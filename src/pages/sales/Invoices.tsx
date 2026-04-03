@@ -1111,110 +1111,106 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
             <button onClick={handleEditSave} className="btn-primary">Save Changes</button>
           </>
         }>
-        <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-3">
-            {selectedInvoice && (
-              <>
-                <div>
-                  <p className="label">Invoice #</p>
-                  <p className="text-sm font-semibold text-primary-700">{selectedInvoice.invoice_number}</p>
-                </div>
-                <div>
-                  <p className="label">Customer</p>
-                  <p className="text-sm font-medium">{selectedInvoice.customer_name}</p>
-                </div>
-                <div>
-                  <p className="label">Status</p>
-                  <StatusBadge status={selectedInvoice.status} />
-                </div>
-              </>
-            )}
+        <div className="space-y-3">
+          {selectedInvoice && (
+            <div className="flex items-center gap-4 px-3 py-2 bg-neutral-50 rounded-lg">
+              <div>
+                <p className="text-[10px] text-neutral-400 uppercase tracking-wider">Invoice #</p>
+                <p className="text-sm font-bold text-primary-700">{selectedInvoice.invoice_number}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-neutral-400 uppercase tracking-wider">Customer</p>
+                <p className="text-sm font-medium text-neutral-800">{selectedInvoice.customer_name}</p>
+              </div>
+              <div className="ml-auto">
+                <StatusBadge status={selectedInvoice.status} />
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-4 gap-2">
             <div>
               <label className="label">Invoice Date</label>
-              <input type="date" value={editForm.invoice_date} onChange={e => setEditForm(f => ({ ...f, invoice_date: e.target.value }))} className="input" />
+              <input type="date" value={editForm.invoice_date} onChange={e => setEditForm(f => ({ ...f, invoice_date: e.target.value }))} className="input text-xs" />
             </div>
             <div>
-              <label className="label">Due Date</label>
-              <input type="date" value={editForm.due_date} onChange={e => setEditForm(f => ({ ...f, due_date: e.target.value }))} className="input" />
+              <label className="label">Due Date <span className="text-neutral-400 font-normal">(optional)</span></label>
+              <input type="date" value={editForm.due_date} onChange={e => setEditForm(f => ({ ...f, due_date: e.target.value }))} className="input text-xs" />
             </div>
             <div>
               <label className="label">Payment Terms</label>
-              <input value={editForm.payment_terms} onChange={e => setEditForm(f => ({ ...f, payment_terms: e.target.value }))} className="input" />
+              <select value={editForm.payment_terms} onChange={e => setEditForm(f => ({ ...f, payment_terms: e.target.value }))} className="input text-xs">
+                <option value="Due on receipt">Due on receipt</option>
+                <option value="Net 7">Net 7 days</option>
+                <option value="Net 15">Net 15 days</option>
+                <option value="Net 30">Net 30 days</option>
+                <option value="Net 45">Net 45 days</option>
+                <option value="Net 60">Net 60 days</option>
+                <option value="Advance">Advance</option>
+                <option value="Custom">{editForm.payment_terms && !['Due on receipt','Net 7','Net 15','Net 30','Net 45','Net 60','Advance'].includes(editForm.payment_terms) ? editForm.payment_terms : 'Custom...'}</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Notes</label>
+              <input value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} className="input text-xs" placeholder="Optional notes..." />
             </div>
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-semibold text-neutral-700">Line Items</p>
-              <button onClick={addEditItem} className="btn-ghost text-xs"><Plus className="w-3.5 h-3.5" /> Add Item</button>
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-xs font-semibold text-neutral-700">Line Items</p>
+              <button onClick={addEditItem} className="btn-ghost text-xs py-1"><Plus className="w-3.5 h-3.5" /> Add Item</button>
             </div>
             <div className="border border-neutral-200 rounded-lg overflow-hidden">
               <table className="w-full">
                 <thead className="bg-neutral-50">
                   <tr>
-                    <th className="table-header text-left">Product / Description</th>
-                    <th className="table-header text-right w-16">Qty</th>
-                    <th className="table-header text-right w-24">Rate</th>
-                    <th className="table-header text-right w-16">Disc%</th>
-                    <th className="table-header text-right w-16">Tax%</th>
-                    <th className="table-header text-right w-24">Total</th>
-                    <th className="table-header w-8" />
+                    <th className="table-header text-left">Product</th>
+                    <th className="table-header text-left">Description</th>
+                    <th className="table-header text-right" style={{width:'60px'}}>Qty</th>
+                    <th className="table-header text-right" style={{width:'80px'}}>Rate</th>
+                    <th className="table-header text-right" style={{width:'56px'}}>Disc%</th>
+                    <th className="table-header text-right" style={{width:'52px'}}>Tax%</th>
+                    <th className="table-header text-right" style={{width:'80px'}}>Total</th>
+                    <th className="table-header" style={{width:'24px'}} />
                   </tr>
                 </thead>
                 <tbody>
                   {editItems.map((item, i) => (
                     <tr key={i} className="border-t border-neutral-100">
-                      <td className="px-3 py-2">
-                        <select value={item.product_id} onChange={e => updateEditItem(i, 'product_id', e.target.value)} className="input text-xs">
-                          <option value="">-- Select Product --</option>
+                      <td className="px-2 py-1.5" style={{minWidth:'140px'}}>
+                        <select value={item.product_id} onChange={e => updateEditItem(i, 'product_id', e.target.value)} className="input text-xs py-1">
+                          <option value="">-- Product --</option>
                           {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
-                        {!item.product_id && <input value={item.product_name} onChange={e => updateEditItem(i, 'product_name', e.target.value)} className="input text-xs mt-1" placeholder="Or type item name..." />}
-                        <input value={item.description} onChange={e => updateEditItem(i, 'description', e.target.value)} className="input text-xs mt-1" placeholder="Description (optional)" />
+                        {!item.product_id && <input value={item.product_name} onChange={e => updateEditItem(i, 'product_name', e.target.value)} className="input text-xs py-1 mt-0.5" placeholder="Type item name..." />}
                       </td>
-                      <td className="px-2 py-2"><input type="number" value={item.quantity} onChange={e => updateEditItem(i, 'quantity', e.target.value)} className="input text-xs text-right" /></td>
-                      <td className="px-2 py-2"><input type="number" value={item.unit_price} onChange={e => updateEditItem(i, 'unit_price', e.target.value)} className="input text-xs text-right" /></td>
-                      <td className="px-2 py-2"><input type="number" value={item.discount_pct} onChange={e => updateEditItem(i, 'discount_pct', e.target.value)} className="input text-xs text-right" /></td>
-                      <td className="px-2 py-2"><input type="number" value={item.tax_pct} onChange={e => updateEditItem(i, 'tax_pct', e.target.value)} className="input text-xs text-right" /></td>
-                      <td className="px-2 py-2 text-right text-sm font-medium">{formatCurrency(item.total_price)}</td>
-                      <td className="px-2 py-2"><button onClick={() => removeEditItem(i)} className="text-neutral-400 hover:text-error-500 text-lg leading-none">&times;</button></td>
+                      <td className="px-2 py-1.5">
+                        <input value={item.description} onChange={e => updateEditItem(i, 'description', e.target.value)} className="input text-xs py-1 w-full" placeholder="Description (optional)" />
+                      </td>
+                      <td className="px-1 py-1.5"><input type="number" value={item.quantity} onChange={e => updateEditItem(i, 'quantity', e.target.value)} className="input text-xs text-right py-1 w-full" /></td>
+                      <td className="px-1 py-1.5"><input type="number" value={item.unit_price} onChange={e => updateEditItem(i, 'unit_price', e.target.value)} className="input text-xs text-right py-1 w-full" /></td>
+                      <td className="px-1 py-1.5"><input type="number" value={item.discount_pct} onChange={e => updateEditItem(i, 'discount_pct', e.target.value)} className="input text-xs text-right py-1 w-full" /></td>
+                      <td className="px-1 py-1.5"><input type="number" value={item.tax_pct} onChange={e => updateEditItem(i, 'tax_pct', e.target.value)} className="input text-xs text-right py-1 w-full" /></td>
+                      <td className="px-2 py-1.5 text-right text-xs font-semibold text-neutral-800">{formatCurrency(item.total_price)}</td>
+                      <td className="px-1 py-1.5 text-center"><button onClick={() => removeEditItem(i)} className="text-neutral-300 hover:text-error-500 text-base leading-none">&times;</button></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <div className="flex justify-end mt-2 gap-3 items-center">
-              <div className="flex items-center gap-2">
-                <label className="label mb-0 text-xs">Courier</label>
-                <input type="number" value={editForm.courier_charges} onChange={e => setEditForm(f => ({ ...f, courier_charges: e.target.value }))} className="input w-24 text-right text-xs" />
+            <div className="flex justify-end mt-2 gap-2 items-center">
+              <div className="flex items-center gap-1.5">
+                <label className="text-xs text-neutral-500">Courier</label>
+                <input type="number" value={editForm.courier_charges} onChange={e => setEditForm(f => ({ ...f, courier_charges: e.target.value }))} className="input w-20 text-right text-xs py-1" />
               </div>
-              <div className="flex items-center gap-2">
-                <label className="label mb-0 text-xs">Discount</label>
-                <input type="number" value={editForm.discount_amount} onChange={e => setEditForm(f => ({ ...f, discount_amount: e.target.value }))} className="input w-24 text-right text-xs" />
+              <div className="flex items-center gap-1.5">
+                <label className="text-xs text-neutral-500">Discount</label>
+                <input type="number" value={editForm.discount_amount} onChange={e => setEditForm(f => ({ ...f, discount_amount: e.target.value }))} className="input w-20 text-right text-xs py-1" />
               </div>
-              <div className="bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-bold">
+              <div className="bg-primary-600 text-white px-3 py-1.5 rounded-lg text-sm font-bold">
                 {formatCurrency(editTotal)}
               </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3 p-4 bg-neutral-50 rounded-lg">
-            <p className="col-span-3 text-xs font-semibold text-neutral-600 mb-1">Bank & Payment Details</p>
-            <div>
-              <label className="label">Bank Name</label>
-              <input value={editForm.bank_name} onChange={e => setEditForm(f => ({ ...f, bank_name: e.target.value }))} className="input" />
-            </div>
-            <div>
-              <label className="label">Account Number</label>
-              <input value={editForm.account_number} onChange={e => setEditForm(f => ({ ...f, account_number: e.target.value }))} className="input" placeholder="XXXX XXXX XXXX" />
-            </div>
-            <div>
-              <label className="label">IFSC Code</label>
-              <input value={editForm.ifsc_code} onChange={e => setEditForm(f => ({ ...f, ifsc_code: e.target.value }))} className="input" placeholder="HDFC0001234" />
-            </div>
-            <div className="col-span-3">
-              <label className="label">Notes</label>
-              <input value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} className="input" placeholder="Optional notes..." />
             </div>
           </div>
         </div>
@@ -1227,91 +1223,84 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
             <button onClick={handleSave} className="btn-primary">Create Invoice</button>
           </>
         }>
-        <div className="space-y-4">
+        <div className="space-y-3">
           {form.sales_order_id && selectedSO && (
-            <div className="p-3 bg-primary-50 border border-primary-100 rounded-lg flex items-center justify-between">
+            <div className="px-3 py-2 bg-primary-50 border border-primary-100 rounded-lg flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold text-primary-700">Creating from Sales Order</p>
+                <p className="text-[10px] font-semibold text-primary-600 uppercase tracking-wider">Creating from Sales Order</p>
                 <p className="text-sm text-primary-800 font-medium">{selectedSO.so_number} &mdash; {selectedSO.customer_name}</p>
               </div>
               <StatusBadge status={selectedSO.status} />
             </div>
           )}
 
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="label">Customer Name *</label>
-              <input value={form.customer_name} onChange={e => setForm(f => ({ ...f, customer_name: e.target.value }))} className="input" placeholder="Full name" />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <p className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wider">Invoice Details</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="label">Invoice Date</label>
+                  <input type="date" value={form.invoice_date} onChange={e => setForm(f => ({ ...f, invoice_date: e.target.value }))} className="input text-xs" />
+                </div>
+                <div>
+                  <label className="label">Due Date <span className="text-neutral-400 font-normal">(optional)</span></label>
+                  <input type="date" value={form.due_date} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} className="input text-xs" />
+                </div>
+                <div>
+                  <label className="label">Payment Terms</label>
+                  <select value={form.payment_terms} onChange={e => setForm(f => ({ ...f, payment_terms: e.target.value }))} className="input text-xs">
+                    <option value="Due on receipt">Due on receipt</option>
+                    <option value="Net 7">Net 7 days</option>
+                    <option value="Net 15">Net 15 days</option>
+                    <option value="Net 30">Net 30 days</option>
+                    <option value="Net 45">Net 45 days</option>
+                    <option value="Net 60">Net 60 days</option>
+                    <option value="Advance">Advance</option>
+                    <option value="Custom">{form.payment_terms && !['Due on receipt','Net 7','Net 15','Net 30','Net 45','Net 60','Advance'].includes(form.payment_terms) ? form.payment_terms : 'Custom...'}</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label flex items-center gap-1"><Warehouse className="w-3 h-3 text-neutral-400" /> Dispatch From</label>
+                  <select value={form.godown_id} onChange={e => { setForm(f => ({ ...f, godown_id: e.target.value })); if (e.target.value) loadGodownStock(e.target.value, items.map(i => i.product_id)); }} className="input text-xs">
+                    <option value="">-- Godown --</option>
+                    {godowns.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </select>
+                </div>
+              </div>
             </div>
-            <div>
-              <label className="label">Phone</label>
-              <input value={form.customer_phone} onChange={e => setForm(f => ({ ...f, customer_phone: e.target.value }))} className="input" placeholder="+91 XXXXX" />
-            </div>
-            <div>
-              <label className="label flex items-center gap-1.5"><Warehouse className="w-3.5 h-3.5 text-neutral-400" /> Dispatch From Godown *</label>
-              <select
-                value={form.godown_id}
-                onChange={e => {
-                  setForm(f => ({ ...f, godown_id: e.target.value }));
-                  if (e.target.value) loadGodownStock(e.target.value, items.map(i => i.product_id));
-                }}
-                className="input"
-              >
-                <option value="">-- Select Godown --</option>
-                {godowns.map(g => <option key={g.id} value={g.id}>{g.name}{g.location ? ` (${g.location})` : ''}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="label">Invoice Date</label>
-              <input type="date" value={form.invoice_date} onChange={e => setForm(f => ({ ...f, invoice_date: e.target.value }))} className="input" />
-            </div>
-            <div>
-              <label className="label">Due Date</label>
-              <input type="date" value={form.due_date} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} className="input" />
-            </div>
-            <div>
-              <label className="label">Payment Terms</label>
-              <input value={form.payment_terms} onChange={e => setForm(f => ({ ...f, payment_terms: e.target.value }))} className="input" />
-            </div>
-            <div className="col-span-3">
-              <label className="label">Address Line 1</label>
-              <input value={form.customer_address} onChange={e => setForm(f => ({ ...f, customer_address: e.target.value }))} className="input" placeholder="House/Flat, Street" />
-            </div>
-            <div className="col-span-3">
-              <label className="label">Address Line 2</label>
-              <input value={form.customer_address2} onChange={e => setForm(f => ({ ...f, customer_address2: e.target.value }))} className="input" placeholder="Area / Colony / Landmark" />
-            </div>
-            <div>
-              <label className="label">City</label>
-              <input value={form.customer_city} onChange={e => setForm(f => ({ ...f, customer_city: e.target.value }))} className="input" placeholder="City" />
-            </div>
-            <div>
-              <label className="label">State</label>
-              <input value={form.customer_state} onChange={e => setForm(f => ({ ...f, customer_state: e.target.value }))} className="input" placeholder="State" />
-            </div>
-            <div>
-              <label className="label">PIN Code</label>
-              <input value={form.customer_pincode} onChange={e => setForm(f => ({ ...f, customer_pincode: e.target.value }))} className="input" placeholder="411001" maxLength={6} />
+
+            <div className="space-y-2">
+              <p className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wider">Bill To</p>
+              <input value={form.customer_name} onChange={e => setForm(f => ({ ...f, customer_name: e.target.value }))} className="input text-xs" placeholder="Customer Name *" />
+              <input value={form.customer_address} onChange={e => setForm(f => ({ ...f, customer_address: e.target.value }))} className="input text-xs" placeholder="Address Line 1" />
+              <input value={form.customer_address2} onChange={e => setForm(f => ({ ...f, customer_address2: e.target.value }))} className="input text-xs" placeholder="Address Line 2" />
+              <div className="flex gap-1.5">
+                <input value={form.customer_city} onChange={e => setForm(f => ({ ...f, customer_city: e.target.value }))} className="input text-xs flex-1" placeholder="City" />
+                <input value={form.customer_state} onChange={e => setForm(f => ({ ...f, customer_state: e.target.value }))} className="input text-xs w-24" placeholder="State" />
+                <input value={form.customer_pincode} onChange={e => setForm(f => ({ ...f, customer_pincode: e.target.value }))} className="input text-xs w-20" placeholder="PIN" maxLength={6} />
+              </div>
+              <input value={form.customer_phone} onChange={e => setForm(f => ({ ...f, customer_phone: e.target.value }))} className="input text-xs" placeholder="Phone" />
             </div>
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-semibold text-neutral-700">Line Items</p>
-              <button onClick={addItem} className="btn-ghost text-xs"><Plus className="w-3.5 h-3.5" /> Add Item</button>
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-xs font-semibold text-neutral-700">Line Items</p>
+              <button onClick={addItem} className="btn-ghost text-xs py-1"><Plus className="w-3.5 h-3.5" /> Add Item</button>
             </div>
             <div className="border border-neutral-200 rounded-lg overflow-hidden">
               <table className="w-full">
                 <thead className="bg-neutral-50">
                   <tr>
-                    <th className="table-header text-left">Product / Description</th>
-                    {form.godown_id && <th className="table-header text-right w-20">In Stock</th>}
-                    <th className="table-header text-right w-16">Qty</th>
-                    <th className="table-header text-right w-24">Rate</th>
-                    <th className="table-header text-right w-16">Disc%</th>
-                    <th className="table-header text-right w-16">Tax%</th>
-                    <th className="table-header text-right w-24">Total</th>
-                    <th className="table-header w-8" />
+                    <th className="table-header text-left">Product</th>
+                    <th className="table-header text-left">Description</th>
+                    {form.godown_id && <th className="table-header text-right" style={{width:'52px'}}>Stock</th>}
+                    <th className="table-header text-right" style={{width:'60px'}}>Qty</th>
+                    <th className="table-header text-right" style={{width:'80px'}}>Rate</th>
+                    <th className="table-header text-right" style={{width:'56px'}}>Disc%</th>
+                    <th className="table-header text-right" style={{width:'52px'}}>Tax%</th>
+                    <th className="table-header text-right" style={{width:'80px'}}>Total</th>
+                    <th className="table-header" style={{width:'24px'}} />
                   </tr>
                 </thead>
                 <tbody>
@@ -1321,68 +1310,53 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
                     const stockWarning = availStock !== null && orderQty > availStock;
                     return (
                       <tr key={i} className={`border-t border-neutral-100 ${stockWarning ? 'bg-warning-50' : ''}`}>
-                        <td className="px-3 py-2">
-                          <select value={item.product_id} onChange={e => updateItem(i, 'product_id', e.target.value)} className="input text-xs">
-                            <option value="">-- Select Product --</option>
+                        <td className="px-2 py-1.5" style={{minWidth:'140px'}}>
+                          <select value={item.product_id} onChange={e => updateItem(i, 'product_id', e.target.value)} className="input text-xs py-1">
+                            <option value="">-- Product --</option>
                             {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                           </select>
-                          {!item.product_id && <input value={item.product_name} onChange={e => updateItem(i, 'product_name', e.target.value)} className="input text-xs mt-1" placeholder="Or type item name..." />}
-                          <input value={item.description} onChange={e => updateItem(i, 'description', e.target.value)} className="input text-xs mt-1" placeholder="Description (optional)" />
+                          {!item.product_id && <input value={item.product_name} onChange={e => updateItem(i, 'product_name', e.target.value)} className="input text-xs py-1 mt-0.5" placeholder="Type item name..." />}
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <input value={item.description} onChange={e => updateItem(i, 'description', e.target.value)} className="input text-xs py-1 w-full" placeholder="Description (optional)" />
                         </td>
                         {form.godown_id && (
-                          <td className="px-2 py-2 text-right">
+                          <td className="px-1 py-1.5 text-right">
                             {availStock !== null ? (
-                              <span className={`text-xs font-semibold ${availStock === 0 ? 'text-error-600' : stockWarning ? 'text-warning-600' : 'text-success-600'}`}>
-                                {availStock}
-                              </span>
+                              <span className={`text-xs font-semibold ${availStock === 0 ? 'text-error-600' : stockWarning ? 'text-warning-600' : 'text-success-600'}`}>{availStock}</span>
                             ) : <span className="text-neutral-300 text-xs">—</span>}
                           </td>
                         )}
-                        <td className="px-2 py-2"><input type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} className={`input text-xs text-right ${stockWarning ? 'border-warning-400' : ''}`} /></td>
-                        <td className="px-2 py-2"><input type="number" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', e.target.value)} className="input text-xs text-right" /></td>
-                        <td className="px-2 py-2"><input type="number" value={item.discount_pct} onChange={e => updateItem(i, 'discount_pct', e.target.value)} className="input text-xs text-right" /></td>
-                        <td className="px-2 py-2"><input type="number" value={item.tax_pct} onChange={e => updateItem(i, 'tax_pct', e.target.value)} className="input text-xs text-right" /></td>
-                        <td className="px-2 py-2 text-right text-sm font-medium">{formatCurrency(item.total_price)}</td>
-                        <td className="px-2 py-2"><button onClick={() => removeItem(i)} className="text-neutral-400 hover:text-error-500 text-lg leading-none">&times;</button></td>
+                        <td className="px-1 py-1.5"><input type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} className={`input text-xs text-right py-1 w-full ${stockWarning ? 'border-warning-400' : ''}`} /></td>
+                        <td className="px-1 py-1.5"><input type="number" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', e.target.value)} className="input text-xs text-right py-1 w-full" /></td>
+                        <td className="px-1 py-1.5"><input type="number" value={item.discount_pct} onChange={e => updateItem(i, 'discount_pct', e.target.value)} className="input text-xs text-right py-1 w-full" /></td>
+                        <td className="px-1 py-1.5"><input type="number" value={item.tax_pct} onChange={e => updateItem(i, 'tax_pct', e.target.value)} className="input text-xs text-right py-1 w-full" /></td>
+                        <td className="px-2 py-1.5 text-right text-xs font-semibold text-neutral-800">{formatCurrency(item.total_price)}</td>
+                        <td className="px-1 py-1.5 text-center"><button onClick={() => removeItem(i)} className="text-neutral-300 hover:text-error-500 text-base leading-none">&times;</button></td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-            <div className="flex justify-end mt-2 gap-3 items-center">
-              <div className="flex items-center gap-2">
-                <label className="label mb-0 text-xs">Courier</label>
-                <input type="number" value={form.courier_charges} onChange={e => setForm(f => ({ ...f, courier_charges: e.target.value }))} className="input w-24 text-right text-xs" />
+            <div className="flex justify-end mt-2 gap-2 items-center">
+              <div className="flex items-center gap-1.5">
+                <label className="text-xs text-neutral-500">Courier</label>
+                <input type="number" value={form.courier_charges} onChange={e => setForm(f => ({ ...f, courier_charges: e.target.value }))} className="input w-20 text-right text-xs py-1" />
               </div>
-              <div className="flex items-center gap-2">
-                <label className="label mb-0 text-xs">Discount</label>
-                <input type="number" value={form.discount_amount} onChange={e => setForm(f => ({ ...f, discount_amount: e.target.value }))} className="input w-24 text-right text-xs" />
+              <div className="flex items-center gap-1.5">
+                <label className="text-xs text-neutral-500">Discount</label>
+                <input type="number" value={form.discount_amount} onChange={e => setForm(f => ({ ...f, discount_amount: e.target.value }))} className="input w-20 text-right text-xs py-1" />
               </div>
-              <div className="bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-bold">
+              <div className="bg-primary-600 text-white px-3 py-1.5 rounded-lg text-sm font-bold">
                 {formatCurrency(total)}
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3 p-4 bg-neutral-50 rounded-lg">
-            <p className="col-span-3 text-xs font-semibold text-neutral-600 mb-1">Bank & Payment Details</p>
-            <div>
-              <label className="label">Bank Name</label>
-              <input value={form.bank_name} onChange={e => setForm(f => ({ ...f, bank_name: e.target.value }))} className="input" />
-            </div>
-            <div>
-              <label className="label">Account Number</label>
-              <input value={form.account_number} onChange={e => setForm(f => ({ ...f, account_number: e.target.value }))} className="input" placeholder="XXXX XXXX XXXX" />
-            </div>
-            <div>
-              <label className="label">IFSC Code</label>
-              <input value={form.ifsc_code} onChange={e => setForm(f => ({ ...f, ifsc_code: e.target.value }))} className="input" placeholder="HDFC0001234" />
-            </div>
-            <div className="col-span-3">
-              <label className="label">Notes</label>
-              <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className="input" placeholder="Optional notes..." />
-            </div>
+          <div>
+            <label className="label">Notes</label>
+            <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className="input text-xs" placeholder="Optional notes for the invoice..." />
           </div>
         </div>
       </Modal>
