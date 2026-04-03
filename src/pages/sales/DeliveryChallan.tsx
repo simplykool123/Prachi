@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Printer, Truck, Download, Eye, Pencil, Trash2, Send, Receipt } from 'lucide-react';
+import { Plus, Search, Printer, Truck, Download, Eye, Pencil, Trash2, Send, Receipt, FileText, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { formatDate, generateId, exportToCSV } from '../../lib/utils';
+import { formatDate, formatCurrency, generateId, exportToCSV } from '../../lib/utils';
+import { getSmartRate } from '../../lib/rateCardService';
 import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import ChallanPrint from './ChallanPrint';
-import type { DeliveryChallan as DCType, Product, Customer } from '../../types';
+import type { DeliveryChallan as DCType, Product, Customer, SalesOrder, SalesOrderItem } from '../../types';
 import type { ActivePage } from '../../types';
 import type { PageState } from '../../App';
 
@@ -16,6 +17,9 @@ interface LineItem {
   product_name: string;
   unit: string;
   quantity: string;
+  unit_price: string;
+  discount_pct: string;
+  total_price: number;
 }
 
 interface ChallanItem {
@@ -25,11 +29,22 @@ interface ChallanItem {
   product_name: string;
   unit: string;
   quantity: number;
+  unit_price: number;
+  total_price: number;
 }
 
 interface DeliveryChallanProps {
   onNavigate: (page: ActivePage, state?: PageState) => void;
 }
+
+const emptyForm = {
+  customer_id: '', customer_name: '', customer_phone: '',
+  customer_address: '', customer_address2: '',
+  customer_city: '', customer_state: '', customer_pincode: '',
+  challan_date: new Date().toISOString().split('T')[0],
+  dispatch_mode: 'Courier', courier_company: '', tracking_number: '', notes: '',
+  sales_order_id: '',
+};
 
 export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
   const [challans, setChallans] = useState<DCType[]>([]);
@@ -39,33 +54,31 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
   const [selectedChallan, setSelectedChallan] = useState<DCType | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [salesOrders, setSalesOrders] = useState<SalesOrder[]>([]);
   const [editChallan, setEditChallan] = useState<DCType | null>(null);
   const [viewChallan, setViewChallan] = useState<DCType | null>(null);
   const [viewItems, setViewItems] = useState<ChallanItem[]>([]);
   const [showViewModal, setShowViewModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DCType | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [loadingSO, setLoadingSO] = useState(false);
 
-  const [form, setForm] = useState({
-    customer_id: '', customer_name: '', customer_phone: '',
-    customer_address: '', customer_address2: '',
-    customer_city: '', customer_state: '', customer_pincode: '',
-    challan_date: new Date().toISOString().split('T')[0],
-    dispatch_mode: 'Courier', courier_company: '', tracking_number: '', notes: '',
-  });
-  const [items, setItems] = useState<LineItem[]>([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1' }]);
+  const [form, setForm] = useState(emptyForm);
+  const [items, setItems] = useState<LineItem[]>([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0 }]);
 
   useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
-    const [challansRes, productsRes, customersRes] = await Promise.all([
+    const [challansRes, productsRes, customersRes, soRes] = await Promise.all([
       supabase.from('delivery_challans').select('*').order('created_at', { ascending: false }),
-      supabase.from('products').select('id, name, unit').eq('is_active', true),
+      supabase.from('products').select('id, name, unit, selling_price').eq('is_active', true),
       supabase.from('customers').select('id, name, phone, address, address2, city, state, pincode').eq('is_active', true).order('name'),
+      supabase.from('sales_orders').select('id, so_number, customer_id, customer_name, status').in('status', ['confirmed', 'dispatched']).order('created_at', { ascending: false }),
     ]);
     setChallans(challansRes.data || []);
     setProducts(productsRes.data || []);
     setCustomers(customersRes.data || []);
+    setSalesOrders((soRes.data || []) as SalesOrder[]);
   };
 
   const handleCustomerChange = (id: string) => {
@@ -76,29 +89,92 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
       customer_name: c?.name || '',
       customer_phone: c?.phone || '',
       customer_address: c?.address || '',
-      customer_address2: (c as Customer & { address2?: string })?.address2 || '',
+      customer_address2: c?.address2 || '',
       customer_city: c?.city || '',
       customer_state: c?.state || '',
       customer_pincode: c?.pincode || '',
     }));
   };
 
-  const updateItem = (i: number, field: string, value: string) => {
+  const handleSOChange = async (soId: string) => {
+    setForm(f => ({ ...f, sales_order_id: soId }));
+    if (!soId) return;
+    setLoadingSO(true);
+    const so = salesOrders.find(s => s.id === soId);
+    if (so) {
+      const c = customers.find(c => c.id === so.customer_id);
+      setForm(f => ({
+        ...f,
+        sales_order_id: soId,
+        customer_id: so.customer_id || '',
+        customer_name: so.customer_name,
+        customer_phone: c?.phone || '',
+        customer_address: c?.address || '',
+        customer_address2: c?.address2 || '',
+        customer_city: c?.city || '',
+        customer_state: c?.state || '',
+        customer_pincode: c?.pincode || '',
+      }));
+    }
+    const { data: soItems } = await supabase
+      .from('sales_order_items')
+      .select('*')
+      .eq('sales_order_id', soId);
+    if (soItems && soItems.length > 0) {
+      setItems(soItems.map((i: SalesOrderItem) => ({
+        product_id: i.product_id || '',
+        product_name: i.product_name,
+        unit: i.unit,
+        quantity: String(i.quantity),
+        unit_price: String(i.unit_price),
+        discount_pct: String(i.discount_pct || 0),
+        total_price: i.total_price,
+      })));
+    }
+    setLoadingSO(false);
+  };
+
+  const calcTotal = (qty: string, price: string, disc: string): number => {
+    const q = parseFloat(qty) || 0;
+    const p = parseFloat(price) || 0;
+    const d = parseFloat(disc) || 0;
+    return q * p * (1 - d / 100);
+  };
+
+  const updateItem = async (i: number, field: string, value: string) => {
     setItems(prev => {
       const next = [...prev];
       next[i] = { ...next[i], [field]: value };
       if (field === 'product_id') {
         const p = products.find(p => p.id === value);
-        if (p) { next[i].product_name = p.name; next[i].unit = p.unit; }
+        if (p) {
+          next[i].product_name = p.name;
+          next[i].unit = p.unit;
+          next[i].unit_price = String(p.selling_price || 0);
+        }
       }
+      next[i].total_price = calcTotal(next[i].quantity, next[i].unit_price, next[i].discount_pct);
       return next;
     });
+
+    if (field === 'product_id' && value && form.customer_id) {
+      const rate = await getSmartRate(form.customer_id, value, products.find(p => p.id === value)?.selling_price || 0);
+      setItems(prev => {
+        const next = [...prev];
+        next[i] = { ...next[i], unit_price: String(rate) };
+        next[i].total_price = calcTotal(next[i].quantity, String(rate), next[i].discount_pct);
+        return next;
+      });
+    }
   };
+
+  const subtotal = items.reduce((s, i) => s + i.total_price, 0);
 
   const handleSave = async () => {
     const challanNumber = generateId('DC');
     const { data: challan } = await supabase.from('delivery_challans').insert({
       challan_number: challanNumber,
+      sales_order_id: form.sales_order_id || null,
       customer_id: form.customer_id || null,
       customer_name: form.customer_name,
       customer_phone: form.customer_phone,
@@ -122,8 +198,14 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
           product_name: i.product_name,
           unit: i.unit,
           quantity: parseFloat(i.quantity) || 0,
+          unit_price: parseFloat(i.unit_price) || 0,
+          discount_pct: parseFloat(i.discount_pct) || 0,
+          total_price: i.total_price,
         }))
       );
+      if (form.sales_order_id) {
+        await supabase.from('sales_orders').update({ status: 'dispatched' }).eq('id', form.sales_order_id);
+      }
     }
     setShowModal(false);
     loadData();
@@ -132,6 +214,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
   const handleEdit = async () => {
     if (!editChallan) return;
     await supabase.from('delivery_challans').update({
+      sales_order_id: form.sales_order_id || null,
       customer_id: form.customer_id || null,
       customer_name: form.customer_name,
       customer_phone: form.customer_phone,
@@ -154,6 +237,9 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
         product_name: i.product_name,
         unit: i.unit,
         quantity: parseFloat(i.quantity) || 0,
+        unit_price: parseFloat(i.unit_price) || 0,
+        discount_pct: parseFloat(i.discount_pct) || 0,
+        total_price: i.total_price,
       }))
     );
     setShowModal(false);
@@ -178,6 +264,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
       courier_company: dc.courier_company || '',
       tracking_number: dc.tracking_number || '',
       notes: dc.notes || '',
+      sales_order_id: dc.sales_order_id || '',
     });
     setItems(
       existingItems && existingItems.length > 0
@@ -186,8 +273,11 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
             product_name: i.product_name,
             unit: i.unit,
             quantity: String(i.quantity),
+            unit_price: String(i.unit_price || 0),
+            discount_pct: String(i.discount_pct || 0),
+            total_price: i.total_price || 0,
           }))
-        : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1' }]
+        : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0 }]
     );
     setShowModal(true);
   };
@@ -195,8 +285,15 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
   const openView = async (dc: DCType) => {
     const { data: itemsData } = await supabase.from('delivery_challan_items').select('*').eq('delivery_challan_id', dc.id);
     setViewChallan(dc);
-    setViewItems(itemsData || []);
+    setViewItems((itemsData || []) as ChallanItem[]);
     setShowViewModal(true);
+  };
+
+  const openNew = () => {
+    setEditChallan(null);
+    setForm(emptyForm);
+    setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0 }]);
+    setShowModal(true);
   };
 
   const handleDelete = async () => {
@@ -206,27 +303,25 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
     loadData();
   };
 
+  const openPrint = async (dc: DCType) => {
+    const { data: itemsData } = await supabase.from('delivery_challan_items').select('*').eq('delivery_challan_id', dc.id);
+    setSelectedChallan({ ...dc, items: itemsData || [] });
+    setShowPrint(true);
+  };
+
   const handleExportCSV = () => {
     exportToCSV(
       filtered.map(dc => ({
         'Challan Number': dc.challan_number,
         'Customer': dc.customer_name,
-        'Phone': dc.customer_phone || '',
         'Date': dc.challan_date,
         'Dispatch Mode': dc.dispatch_mode || '',
-        'Courier Company': dc.courier_company || '',
-        'Tracking Number': dc.tracking_number || '',
+        'Courier': dc.courier_company || '',
+        'Tracking': dc.tracking_number || '',
         'Status': dc.status,
-        'Notes': dc.notes || '',
       })),
       'delivery-challans'
     );
-  };
-
-  const openPrint = async (dc: DCType) => {
-    const { data: itemsData } = await supabase.from('delivery_challan_items').select('*').eq('delivery_challan_id', dc.id);
-    setSelectedChallan({ ...dc, items: itemsData || [] });
-    setShowPrint(true);
   };
 
   const filtered = challans.filter(c =>
@@ -234,27 +329,26 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
     c.customer_name.toLowerCase().includes(search.toLowerCase())
   );
 
+  const customerSOs = salesOrders.filter(so =>
+    !form.customer_id || so.customer_id === form.customer_id
+  );
+
   return (
     <div className="flex-1 overflow-y-auto bg-neutral-50">
       <div className="bg-white border-b border-neutral-100 px-6 py-4 flex items-center justify-between no-print">
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Delivery Challans</h1>
-          <p className="text-xs text-neutral-500 mt-0.5">Track dispatches and deliveries</p>
+          <p className="text-xs text-neutral-500 mt-0.5">Track dispatches and deliveries — link to Sales Orders</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search challans..." className="input pl-8 w-52 text-xs" />
           </div>
-          <button onClick={handleExportCSV} className="btn-secondary flex items-center gap-1.5 text-xs">
-            <Download className="w-3.5 h-3.5" /> Export CSV
+          <button onClick={handleExportCSV} className="btn-secondary text-xs flex items-center gap-1.5">
+            <Download className="w-3.5 h-3.5" /> Export
           </button>
-          <button onClick={() => {
-            setEditChallan(null);
-            setForm({ customer_id: '', customer_name: '', customer_phone: '', customer_address: '', customer_address2: '', customer_city: '', customer_state: '', customer_pincode: '', challan_date: new Date().toISOString().split('T')[0], dispatch_mode: 'Courier', courier_company: '', tracking_number: '', notes: '' });
-            setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1' }]);
-            setShowModal(true);
-          }} className="btn-primary">
+          <button onClick={openNew} className="btn-primary">
             <Plus className="w-4 h-4" /> New Challan
           </button>
         </div>
@@ -267,6 +361,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
               <tr>
                 <th className="table-header text-left">Challan #</th>
                 <th className="table-header text-left">Customer</th>
+                <th className="table-header text-left">SO Linked</th>
                 <th className="table-header text-left">Date</th>
                 <th className="table-header text-left">Courier</th>
                 <th className="table-header text-left">Tracking</th>
@@ -277,40 +372,41 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
             <tbody>
               {filtered.map(dc => (
                 <tr key={dc.id} className="border-b border-neutral-50 hover:bg-neutral-50 transition-colors">
-                  <td className="table-cell font-medium text-primary-700">{dc.challan_number}</td>
+                  <td className="table-cell font-medium text-primary-700 text-xs">{dc.challan_number}</td>
                   <td className="table-cell">
-                    <p className="font-medium">{dc.customer_name}</p>
-                    <p className="text-xs text-neutral-400">{dc.customer_phone}</p>
+                    <p className="font-medium text-sm">{dc.customer_name}</p>
+                    {dc.customer_phone && <p className="text-xs text-neutral-400">{dc.customer_phone}</p>}
                   </td>
-                  <td className="table-cell text-neutral-500">{formatDate(dc.challan_date)}</td>
-                  <td className="table-cell text-neutral-600">{dc.courier_company || dc.dispatch_mode}</td>
+                  <td className="table-cell">
+                    {dc.sales_order_id ? (
+                      <span className="text-xs font-medium bg-blue-50 text-blue-700 px-2 py-0.5 rounded">
+                        {salesOrders.find(s => s.id === dc.sales_order_id)?.so_number || 'SO Linked'}
+                      </span>
+                    ) : <span className="text-neutral-300 text-xs">—</span>}
+                  </td>
+                  <td className="table-cell text-neutral-500 text-sm">{formatDate(dc.challan_date)}</td>
+                  <td className="table-cell text-neutral-600 text-sm">{dc.courier_company || dc.dispatch_mode || '—'}</td>
                   <td className="table-cell">
                     {dc.tracking_number ? (
                       <span className="text-xs font-mono bg-neutral-100 px-2 py-0.5 rounded">{dc.tracking_number}</span>
-                    ) : <span className="text-neutral-400">-</span>}
+                    ) : <span className="text-neutral-400 text-xs">-</span>}
                   </td>
                   <td className="table-cell"><StatusBadge status={dc.status} /></td>
                   <td className="table-cell text-right">
                     <div className="flex items-center justify-end gap-1">
                       {dc.status !== 'cancelled' && (
-                        <button
-                          onClick={() => onNavigate('courier', { prefillDCForShipment: dc })}
-                          title="Create Shipment"
-                          className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
-                        >
-                          <Send className="w-3 h-3" /> Ship
+                        <button onClick={() => onNavigate('courier', { prefillDCForShipment: dc })} title="Create Shipment"
+                          className="p-1.5 rounded-lg text-neutral-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
+                          <Send className="w-3.5 h-3.5" />
                         </button>
                       )}
-                      {dc.status !== 'cancelled' && dc.sales_order_id && (
-                        <button
-                          onClick={() => onNavigate('invoices', { prefillDCForInvoice: dc })}
-                          title="Create Invoice from this DC"
-                          className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-primary-50 text-primary-700 hover:bg-primary-100 transition-colors"
-                        >
-                          <Receipt className="w-3 h-3" /> Invoice
+                      {dc.status !== 'cancelled' && (
+                        <button onClick={() => onNavigate('invoices', { prefillDCForInvoice: dc })} title="Create Invoice"
+                          className="p-1.5 rounded-lg text-neutral-400 hover:text-primary-600 hover:bg-primary-50 transition-colors">
+                          <Receipt className="w-3.5 h-3.5" />
                         </button>
                       )}
-                      <button onClick={() => openView(dc)} title="View" className="p-1.5 rounded-lg text-neutral-400 hover:text-primary-600 hover:bg-primary-50 transition-colors"><Eye className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => openView(dc)} title="View" className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors"><Eye className="w-3.5 h-3.5" /></button>
                       <button onClick={() => openPrint(dc)} title="Print" className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors"><Printer className="w-3.5 h-3.5" /></button>
                       {dc.status !== 'delivered' && dc.status !== 'cancelled' && (
                         <button onClick={() => openEdit(dc)} title="Edit" className="p-1.5 rounded-lg text-neutral-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
@@ -326,15 +422,37 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
         </div>
       </div>
 
-      <Modal isOpen={showModal} onClose={() => { setShowModal(false); setEditChallan(null); }} title={editChallan ? `Edit Challan — ${editChallan.challan_number}` : 'New Delivery Challan'} size="lg"
+      <Modal isOpen={showModal} onClose={() => { setShowModal(false); setEditChallan(null); }}
+        title={editChallan ? `Edit Challan — ${editChallan.challan_number}` : 'New Delivery Challan'} size="xl"
         footer={
           <>
             <button onClick={() => { setShowModal(false); setEditChallan(null); }} className="btn-secondary">Cancel</button>
-            <button onClick={editChallan ? handleEdit : handleSave} className="btn-primary">{editChallan ? 'Save Changes' : 'Create Challan'}</button>
+            <button onClick={editChallan ? handleEdit : handleSave} className="btn-primary">
+              {editChallan ? 'Save Changes' : 'Create Challan'}
+            </button>
           </>
         }>
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <FileText className="w-3.5 h-3.5 text-blue-600" />
+              <p className="text-xs font-semibold text-blue-800">Link to Sales Order (optional)</p>
+            </div>
+            <select
+              value={form.sales_order_id}
+              onChange={e => handleSOChange(e.target.value)}
+              className="input text-xs"
+              disabled={loadingSO}
+            >
+              <option value="">-- Select Sales Order to auto-fill items & customer --</option>
+              {salesOrders.map(so => (
+                <option key={so.id} value={so.id}>{so.so_number} — {so.customer_name}</option>
+              ))}
+            </select>
+            {loadingSO && <p className="text-xs text-blue-600 mt-1">Loading items from Sales Order...</p>}
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="label">Customer</label>
               <select value={form.customer_id} onChange={e => handleCustomerChange(e.target.value)} className="input">
@@ -354,26 +472,6 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
               <label className="label">Challan Date</label>
               <input type="date" value={form.challan_date} onChange={e => setForm(f => ({ ...f, challan_date: e.target.value }))} className="input" />
             </div>
-            <div className="col-span-2">
-              <label className="label">Address Line 1</label>
-              <input value={form.customer_address} onChange={e => setForm(f => ({ ...f, customer_address: e.target.value }))} className="input" placeholder="Street / House No." />
-            </div>
-            <div className="col-span-2">
-              <label className="label">Address Line 2</label>
-              <input value={form.customer_address2} onChange={e => setForm(f => ({ ...f, customer_address2: e.target.value }))} className="input" placeholder="Area / Landmark" />
-            </div>
-            <div>
-              <label className="label">City</label>
-              <input value={form.customer_city} onChange={e => setForm(f => ({ ...f, customer_city: e.target.value }))} className="input" placeholder="City" />
-            </div>
-            <div>
-              <label className="label">State</label>
-              <input value={form.customer_state} onChange={e => setForm(f => ({ ...f, customer_state: e.target.value }))} className="input" placeholder="State" />
-            </div>
-            <div>
-              <label className="label">PIN Code</label>
-              <input value={form.customer_pincode} onChange={e => setForm(f => ({ ...f, customer_pincode: e.target.value }))} className="input" placeholder="PIN Code" />
-            </div>
             <div>
               <label className="label">Dispatch Mode</label>
               <select value={form.dispatch_mode} onChange={e => setForm(f => ({ ...f, dispatch_mode: e.target.value }))} className="input">
@@ -382,26 +480,41 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
             </div>
             <div>
               <label className="label">Courier Company</label>
-              <input value={form.courier_company} onChange={e => setForm(f => ({ ...f, courier_company: e.target.value }))} className="input" placeholder="e.g., BlueDart, DTDC" />
+              <input value={form.courier_company} onChange={e => setForm(f => ({ ...f, courier_company: e.target.value }))} className="input" placeholder="e.g., BlueDart" />
             </div>
-            <div className="col-span-2">
+            <div>
               <label className="label">Tracking Number</label>
               <input value={form.tracking_number} onChange={e => setForm(f => ({ ...f, tracking_number: e.target.value }))} className="input" placeholder="AWB / Tracking ID" />
+            </div>
+            <div>
+              <label className="label">Address</label>
+              <input value={form.customer_address} onChange={e => setForm(f => ({ ...f, customer_address: e.target.value }))} className="input" placeholder="Street / House No." />
+            </div>
+            <div>
+              <label className="label">City / State / PIN</label>
+              <div className="flex gap-1">
+                <input value={form.customer_city} onChange={e => setForm(f => ({ ...f, customer_city: e.target.value }))} className="input" placeholder="City" />
+                <input value={form.customer_pincode} onChange={e => setForm(f => ({ ...f, customer_pincode: e.target.value }))} className="input w-24" placeholder="PIN" />
+              </div>
             </div>
           </div>
 
           <div>
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm font-semibold text-neutral-700">Items</p>
-              <button onClick={() => setItems(prev => [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1' }])} className="btn-ghost text-xs"><Plus className="w-3.5 h-3.5" /> Add</button>
+              <button onClick={() => setItems(prev => [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0 }])}
+                className="btn-ghost text-xs"><Plus className="w-3.5 h-3.5" /> Add Item</button>
             </div>
             <div className="border border-neutral-200 rounded-lg overflow-hidden">
               <table className="w-full">
                 <thead className="bg-neutral-50">
                   <tr>
                     <th className="table-header text-left">Product</th>
-                    <th className="table-header text-center w-20">Unit</th>
+                    <th className="table-header text-center w-16">Unit</th>
                     <th className="table-header text-right w-20">Qty</th>
+                    <th className="table-header text-right w-24">Price (₹)</th>
+                    <th className="table-header text-right w-16">Disc%</th>
+                    <th className="table-header text-right w-24">Total</th>
                     <th className="table-header w-8" />
                   </tr>
                 </thead>
@@ -410,31 +523,43 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
                     <tr key={i} className="border-t border-neutral-100">
                       <td className="px-3 py-2">
                         <select value={item.product_id} onChange={e => updateItem(i, 'product_id', e.target.value)} className="input text-xs">
-                          <option value="">-- Select Product --</option>
+                          <option value="">-- Product --</option>
                           {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
                         {!item.product_id && <input value={item.product_name} onChange={e => updateItem(i, 'product_name', e.target.value)} className="input text-xs mt-1" placeholder="Or type name..." />}
                       </td>
                       <td className="px-3 py-2"><input value={item.unit} onChange={e => updateItem(i, 'unit', e.target.value)} className="input text-xs text-center" /></td>
                       <td className="px-3 py-2"><input type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} className="input text-xs text-right" /></td>
-                      <td className="px-3 py-2"><button onClick={() => setItems(prev => prev.filter((_, idx) => idx !== i))} className="text-neutral-400 hover:text-error-500 text-lg leading-none">&times;</button></td>
+                      <td className="px-3 py-2"><input type="number" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', e.target.value)} className="input text-xs text-right" /></td>
+                      <td className="px-3 py-2"><input type="number" value={item.discount_pct} onChange={e => updateItem(i, 'discount_pct', e.target.value)} className="input text-xs text-right" /></td>
+                      <td className="px-3 py-2 text-right text-sm font-medium text-neutral-700">{formatCurrency(item.total_price)}</td>
+                      <td className="px-3 py-2">
+                        <button onClick={() => setItems(prev => prev.filter((_, idx) => idx !== i))} className="text-neutral-400 hover:text-error-500">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            <div className="flex justify-end mt-2">
+              <div className="bg-primary-600 text-white px-4 py-1.5 rounded-lg text-sm font-bold">
+                Total: {formatCurrency(subtotal)}
+              </div>
+            </div>
           </div>
+
           <div>
             <label className="label">Notes</label>
-            <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className="input resize-none h-16" />
+            <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className="input resize-none h-14" />
           </div>
         </div>
       </Modal>
 
-      <Modal isOpen={showViewModal} onClose={() => { setShowViewModal(false); setViewChallan(null); }} title={viewChallan ? `Delivery Challan — ${viewChallan.challan_number}` : ''} size="lg"
-        footer={
-          <button onClick={() => { setShowViewModal(false); setViewChallan(null); }} className="btn-secondary">Close</button>
-        }>
+      <Modal isOpen={showViewModal} onClose={() => { setShowViewModal(false); setViewChallan(null); }}
+        title={viewChallan ? `Delivery Challan — ${viewChallan.challan_number}` : ''} size="lg"
+        footer={<button onClick={() => { setShowViewModal(false); setViewChallan(null); }} className="btn-secondary">Close</button>}>
         {viewChallan && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
@@ -447,30 +572,26 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
                 <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Status</p>
                 <StatusBadge status={viewChallan.status} />
               </div>
+              {viewChallan.sales_order_id && (
+                <div>
+                  <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Linked SO</p>
+                  <p className="text-xs font-medium text-blue-700">{salesOrders.find(s => s.id === viewChallan.sales_order_id)?.so_number || '—'}</p>
+                </div>
+              )}
               <div>
                 <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Challan Date</p>
                 <p className="text-neutral-700">{formatDate(viewChallan.challan_date)}</p>
               </div>
-              <div>
-                <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Dispatch Mode</p>
-                <p className="text-neutral-700">{viewChallan.dispatch_mode || '-'}</p>
-              </div>
               {viewChallan.courier_company && (
                 <div>
-                  <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Courier Company</p>
+                  <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Courier</p>
                   <p className="text-neutral-700">{viewChallan.courier_company}</p>
                 </div>
               )}
               {viewChallan.tracking_number && (
                 <div>
-                  <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Tracking Number</p>
+                  <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Tracking</p>
                   <span className="text-xs font-mono bg-neutral-100 px-2 py-0.5 rounded">{viewChallan.tracking_number}</span>
-                </div>
-              )}
-              {viewChallan.customer_address && (
-                <div className="col-span-2">
-                  <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Delivery Address</p>
-                  <p className="text-neutral-700">{viewChallan.customer_address}</p>
                 </div>
               )}
             </div>
@@ -482,29 +603,24 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
                   <thead className="bg-neutral-50">
                     <tr>
                       <th className="table-header text-left">Product</th>
-                      <th className="table-header text-center w-20">Unit</th>
                       <th className="table-header text-right w-20">Qty</th>
+                      <th className="table-header text-right w-24">Rate</th>
+                      <th className="table-header text-right w-24">Total</th>
                     </tr>
                   </thead>
                   <tbody>
                     {viewItems.map((item, idx) => (
                       <tr key={idx} className="border-t border-neutral-100">
                         <td className="table-cell font-medium">{item.product_name}</td>
-                        <td className="table-cell text-center text-neutral-600">{item.unit}</td>
-                        <td className="table-cell text-right font-semibold">{item.quantity}</td>
+                        <td className="table-cell text-right">{item.quantity} {item.unit}</td>
+                        <td className="table-cell text-right">{formatCurrency(item.unit_price)}</td>
+                        <td className="table-cell text-right font-semibold">{formatCurrency(item.total_price)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             </div>
-
-            {viewChallan.notes && (
-              <div>
-                <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider mb-1">Notes</p>
-                <p className="text-sm text-neutral-600 italic">{viewChallan.notes}</p>
-              </div>
-            )}
           </div>
         )}
       </Modal>
@@ -514,7 +630,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
         onClose={() => { setShowConfirm(false); setDeleteTarget(null); }}
         onConfirm={handleDelete}
         title="Cancel Delivery Challan"
-        message={`Are you sure you want to cancel challan ${deleteTarget?.challan_number}? This action cannot be undone.`}
+        message={`Cancel challan ${deleteTarget?.challan_number}?`}
         confirmLabel="Cancel Challan"
         isDanger
       />
