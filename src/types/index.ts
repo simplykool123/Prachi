@@ -428,28 +428,34 @@ export interface Godown {
   updated_at: string;
 }
 
+interface GodownStockProductRef {
+  id: string;
+  name: string;
+  sku: string;
+  unit: string;
+  category?: string;
+  low_stock_alert: number;
+  selling_price: number;
+  purchase_price: number;
+}
+
+interface GodownStockGodownRef {
+  id: string;
+  name: string;
+  code?: string;
+  location?: string;
+}
+
 export interface GodownStock {
-  id?: string;
+  id: string;
   godown_id: string;
   product_id: string;
   quantity: number;
   updated_at: string;
-  godown?: {
-    id: string;
-    name: string;
-    code?: string;
-    location?: string;
-  };
-  product?: {
-    id: string;
-    name: string;
-    sku: string;
-    unit: string;
-    category?: string;
-    low_stock_alert: number;
-    selling_price: number;
-    purchase_price: number;
-  };
+  godown?: GodownStockGodownRef;
+  godowns?: GodownStockGodownRef;
+  product?: GodownStockProductRef;
+  products?: GodownStockProductRef;
 }
 
 export interface DispatchEntry {
