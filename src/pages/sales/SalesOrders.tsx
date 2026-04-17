@@ -7,7 +7,7 @@ import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
 import { useDateRange } from '../../contexts/DateRangeContext';
-import { postStockMovement } from '../../services/stockLedger';
+import { processStockMovement } from '../../services/stockService';
 import { getSmartRate } from '../../lib/rateCardService';
 import { fetchGodowns, getGodownStockForProduct } from '../../services/godownService';
 import { fetchCompanies } from '../../lib/companiesService';
@@ -483,18 +483,23 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           );
         }
 
-        for (const item of soItems) {
-          if (!item.product_id) continue;
-          const godownId = (item as any).godown_id || order.godown_id;
-          if (!godownId) continue;
-          await postStockMovement({
-            productId: item.product_id,
-            godownId,
-            qtyChange: -item.quantity,
-            movementType: 'sale',
-            referenceType: 'invoice',
-            referenceId: inv.id,
-            referenceNumber: inv.invoice_number,
+        const dispatchItems = soItems
+          .filter(item => item.product_id)
+          .map(item => {
+            const godownId = (item as any).godown_id || order.godown_id;
+            return godownId
+              ? { product_id: item.product_id!, godown_id: godownId as string, quantity: item.quantity }
+              : null;
+          })
+          .filter((i): i is { product_id: string; godown_id: string; quantity: number } => i !== null && i.quantity > 0);
+
+        if (dispatchItems.length > 0) {
+          await processStockMovement({
+            type: 'dispatch',
+            items: dispatchItems,
+            reference_type: 'invoice',
+            reference_id: inv.id,
+            reference_number: inv.invoice_number,
             notes: `Invoice ${inv.invoice_number} for ${order.customer_name}`,
           });
         }
