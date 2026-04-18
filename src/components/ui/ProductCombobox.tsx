@@ -108,7 +108,7 @@ export default function ProductCombobox({
       {open && filtered.length > 0 && (
         <ul
           ref={listRef}
-          className="absolute z-50 left-0 right-0 top-full max-h-44 overflow-y-auto bg-white border border-neutral-200 rounded shadow-md py-0.5"
+          className="absolute z-[9999] left-0 right-0 top-full max-h-44 overflow-y-auto bg-white border border-neutral-200 rounded shadow-md py-0.5"
         >
           {filtered.map((p, idx) => {
             const stock = godownStockMap[p.id] !== undefined ? godownStockMap[p.id] : p.stock_quantity ?? 0;

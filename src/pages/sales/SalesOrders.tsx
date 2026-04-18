@@ -892,37 +892,41 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           {form.is_b2b ? (
             /* B2B: side-by-side Bill To / Ship To */
             <div className="grid grid-cols-2 gap-0 border border-neutral-200 rounded-lg overflow-hidden">
-              {/* Bill To — dropdown editable, address fields read-only */}
-              <div className="space-y-1 p-2.5 bg-neutral-50">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 mb-1">Bill To</p>
-                <select ref={customerSelectRef} value={form.customer_id} onChange={e => handleCustomerChange(e.target.value)} onKeyDown={handleCustomerKeyDown} className="input text-xs">
-                  <option value="">-- Select B2B Customer --</option>
-                  {customers.filter(c => c.category === 'B2B').map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {/* Bill To — dropdown editable, address shown as read-only text */}
+              <div className="p-2.5 bg-neutral-50 space-y-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">Bill To</p>
+                <select ref={customerSelectRef} value={form.customer_id} onChange={e => handleCustomerChange(e.target.value)} onKeyDown={handleCustomerKeyDown} className="input text-xs w-full">
+                  <option value="">-- Select Customer --</option>
+                  {customers.filter(c => (c.category || '').toUpperCase() === 'B2B').map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {customers.filter(c => (c.category || '').toUpperCase() === 'B2B').length === 0 && customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
-                <input readOnly value={form.customer_name} className="input text-xs bg-neutral-100 text-neutral-500 cursor-default" placeholder="Name" tabIndex={-1} />
-                <input readOnly value={form.customer_address} className="input text-xs bg-neutral-100 text-neutral-500 cursor-default" placeholder="Address Line 1" tabIndex={-1} />
-                <input readOnly value={form.customer_address2} className="input text-xs bg-neutral-100 text-neutral-500 cursor-default" placeholder="Address Line 2" tabIndex={-1} />
-                <div className="grid grid-cols-3 gap-1">
-                  <input readOnly value={form.customer_city} className="input text-xs bg-neutral-100 text-neutral-500 cursor-default" placeholder="City" tabIndex={-1} />
-                  <input readOnly value={form.customer_state} className="input text-xs bg-neutral-100 text-neutral-500 cursor-default" placeholder="State" tabIndex={-1} />
-                  <input readOnly value={form.customer_pincode} className="input text-xs bg-neutral-100 text-neutral-500 cursor-default" placeholder="PIN" tabIndex={-1} />
-                </div>
-                <input readOnly value={form.customer_phone} className="input text-xs bg-neutral-100 text-neutral-500 cursor-default" placeholder="Phone" tabIndex={-1} />
+                {form.customer_id && (
+                  <div className="text-[11px] text-neutral-500 leading-relaxed px-0.5">
+                    {form.customer_name && <div className="font-medium text-neutral-700">{form.customer_name}</div>}
+                    {[form.customer_address, form.customer_address2].filter(Boolean).join(', ') && (
+                      <div>{[form.customer_address, form.customer_address2].filter(Boolean).join(', ')}</div>
+                    )}
+                    {[form.customer_city, form.customer_state, form.customer_pincode].filter(Boolean).join(' ') && (
+                      <div>{[form.customer_city, form.customer_state, form.customer_pincode].filter(Boolean).join(' ')}</div>
+                    )}
+                    {form.customer_phone && <div>{form.customer_phone}</div>}
+                  </div>
+                )}
               </div>
 
               {/* Ship To — always manual, fully editable */}
-              <div className="space-y-1 p-2.5 border-l border-neutral-200 bg-white">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 mb-1">Ship To</p>
-                <input ref={shipToNameRef} value={form.ship_to_name} onChange={e => setForm(f => ({ ...f, ship_to_name: e.target.value }))} className="input text-xs" placeholder="Recipient name *"
+              <div className="p-2.5 border-l border-neutral-200 bg-white space-y-1">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">Ship To</p>
+                <input ref={shipToNameRef} value={form.ship_to_name} onChange={e => setForm(f => ({ ...f, ship_to_name: e.target.value }))} className="input text-xs w-full" placeholder="Recipient name *"
                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); setTimeout(() => getProductRef(0).current?.focus(), 20); } }} />
-                <input value={form.ship_to_address1} onChange={e => setForm(f => ({ ...f, ship_to_address1: e.target.value }))} className="input text-xs" placeholder="Address Line 1" />
-                <input value={form.ship_to_address2} onChange={e => setForm(f => ({ ...f, ship_to_address2: e.target.value }))} className="input text-xs" placeholder="Address Line 2" />
+                <input value={form.ship_to_address1} onChange={e => setForm(f => ({ ...f, ship_to_address1: e.target.value }))} className="input text-xs w-full" placeholder="Address Line 1" />
+                <input value={form.ship_to_address2} onChange={e => setForm(f => ({ ...f, ship_to_address2: e.target.value }))} className="input text-xs w-full" placeholder="Address Line 2" />
                 <div className="grid grid-cols-3 gap-1">
                   <input value={form.ship_to_city} onChange={e => setForm(f => ({ ...f, ship_to_city: e.target.value }))} className="input text-xs" placeholder="City" />
                   <input value={form.ship_to_state} onChange={e => setForm(f => ({ ...f, ship_to_state: e.target.value }))} className="input text-xs" placeholder="State" />
                   <input value={form.ship_to_pin} onChange={e => setForm(f => ({ ...f, ship_to_pin: e.target.value }))} className="input text-xs" placeholder="PIN" maxLength={6} />
                 </div>
-                <input value={form.ship_to_phone} onChange={e => setForm(f => ({ ...f, ship_to_phone: e.target.value }))} className="input text-xs" placeholder="Phone" />
+                <input value={form.ship_to_phone} onChange={e => setForm(f => ({ ...f, ship_to_phone: e.target.value }))} className="input text-xs w-full" placeholder="Phone" />
               </div>
             </div>
           ) : (
@@ -976,11 +980,11 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
               <p className="text-xs font-semibold text-neutral-600 uppercase tracking-wide">Items</p>
               <button onClick={addItem} className="btn-ghost text-xs"><Plus className="w-3.5 h-3.5" /> Add Item</button>
             </div>
-            <div className="border border-neutral-200 rounded-lg overflow-hidden">
+            <div className="border border-neutral-200 rounded-lg overflow-visible">
               <table className="w-full">
-                <thead className="bg-neutral-50">
+                <thead className="bg-neutral-50 rounded-t-lg">
                   <tr>
-                    <th className="table-header text-left">Product</th>
+                    <th className="table-header text-left rounded-tl-lg">Product</th>
                     <th className="table-header text-left w-32">Godown</th>
                     <th className="table-header text-right w-16">Qty</th>
                     <th className="table-header text-right w-24">Price</th>
