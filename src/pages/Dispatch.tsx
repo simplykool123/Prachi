@@ -199,27 +199,48 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
       updated_at: new Date().toISOString(),
     };
 
-    if (editing) {
-      await supabase.from('dispatch_entries').update(payload).eq('id', editing.id);
-      if (form.status === 'delivered') {
+    try {
+      if (editing) {
+        const { error: updateErr } = await supabase.from('dispatch_entries').update(payload).eq('id', editing.id);
+        if (updateErr) throw updateErr;
+        if (form.status === 'delivered') {
+          if (form.reference_type === 'sales_order' && form.sales_order_id) {
+            const { error: soErr } = await supabase.from('sales_orders').update({ status: 'delivered' }).eq('id', form.sales_order_id);
+            if (soErr) throw soErr;
+          }
+          if (form.reference_type === 'invoice' && form.invoice_id) {
+            const { data: inv, error: invErr } = await supabase
+              .from('invoices')
+              .select('sales_order_id')
+              .eq('id', form.invoice_id)
+              .maybeSingle();
+            if (invErr) throw invErr;
+            if (inv?.sales_order_id) {
+              const { error: dcErr } = await supabase
+                .from('delivery_challans')
+                .update({ status: 'delivered' })
+                .eq('sales_order_id', inv.sales_order_id);
+              if (dcErr) throw dcErr;
+            }
+          }
+        }
+      } else {
+        const dispatch_number = await nextDocNumber('DSP', supabase);
+        const { error: insertErr } = await supabase.from('dispatch_entries').insert({ ...payload, dispatch_number });
+        if (insertErr) throw insertErr;
         if (form.reference_type === 'sales_order' && form.sales_order_id) {
-          await supabase.from('sales_orders').update({ status: 'delivered' }).eq('id', form.sales_order_id);
-        }
-        if (form.reference_type === 'invoice' && form.invoice_id) {
-          await supabase.from('delivery_challans').update({ status: 'delivered' }).eq('invoice_id', form.invoice_id);
+          const { error: soErr } = await supabase.from('sales_orders').update({ status: 'dispatched' }).eq('id', form.sales_order_id);
+          if (soErr) throw soErr;
         }
       }
-    } else {
-      const dispatch_number = await nextDocNumber('DSP', supabase);
-      await supabase.from('dispatch_entries').insert({ ...payload, dispatch_number });
-      if (form.reference_type === 'sales_order' && form.sales_order_id) {
-        await supabase.from('sales_orders').update({ status: 'dispatched' }).eq('id', form.sales_order_id);
-      }
+      setShowModal(false);
+      await loadDispatches();
+    } catch (err) {
+      console.error('Failed to save dispatch:', err);
+      alert(err instanceof Error ? err.message : 'Failed to save dispatch');
+    } finally {
+      setSaving(false);
     }
-
-    setSaving(false);
-    setShowModal(false);
-    await loadDispatches();
   };
 
   const markDelivered = async (d: DispatchEntry) => {

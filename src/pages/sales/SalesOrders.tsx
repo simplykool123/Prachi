@@ -7,7 +7,7 @@ import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
 import { useDateRange } from '../../contexts/DateRangeContext';
-import { postStockMovement } from '../../services/stockLedger';
+import { processStockMovement } from '../../services/stockService';
 import { getSmartRate } from '../../lib/rateCardService';
 import { fetchGodowns, getGodownStockForProduct } from '../../services/godownService';
 import { fetchCompanies } from '../../lib/companiesService';
@@ -257,39 +257,48 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       alert(`Please select a godown for every product line. ${missingGodown.length} line(s) have no godown assigned.`);
       return;
     }
-    await supabase.from('sales_orders').update({
-      customer_id: form.customer_id || null,
-      customer_name: form.customer_name,
-      customer_phone: form.customer_phone,
-      customer_address: form.customer_address,
-      customer_address2: form.customer_address2,
-      customer_city: form.customer_city,
-      customer_state: form.customer_state,
-      customer_pincode: form.customer_pincode,
-      so_date: form.so_date,
-      delivery_date: form.delivery_date || null,
-      courier_charges: parseFloat(form.courier_charges) || 0,
-      discount_amount: parseFloat(form.discount_amount) || 0,
-      subtotal,
-      total_amount: total,
-      notes: form.notes,
-    }).eq('id', editOrder.id);
-    await supabase.from('sales_order_items').delete().eq('sales_order_id', editOrder.id);
-    await supabase.from('sales_order_items').insert(
-      items.filter(i => i.product_name).map(i => ({
-        sales_order_id: editOrder.id,
-        product_id: i.product_id || null,
-        product_name: i.product_name,
-        unit: i.unit,
-        quantity: parseFloat(i.quantity) || 0,
-        unit_price: parseFloat(i.unit_price) || 0,
-        discount_pct: parseFloat(i.discount_pct) || 0,
-        total_price: i.total_price,
-      }))
-    );
-    setShowModal(false);
-    setEditOrder(null);
-    loadData();
+    try {
+      const { error: updateErr } = await supabase.from('sales_orders').update({
+        customer_id: form.customer_id || null,
+        customer_name: form.customer_name,
+        customer_phone: form.customer_phone,
+        customer_address: form.customer_address,
+        customer_address2: form.customer_address2,
+        customer_city: form.customer_city,
+        customer_state: form.customer_state,
+        customer_pincode: form.customer_pincode,
+        so_date: form.so_date,
+        delivery_date: form.delivery_date || null,
+        courier_charges: parseFloat(form.courier_charges) || 0,
+        discount_amount: parseFloat(form.discount_amount) || 0,
+        subtotal,
+        total_amount: total,
+        notes: form.notes,
+      }).eq('id', editOrder.id);
+      if (updateErr) throw updateErr;
+      const { error: delItemsErr } = await supabase.from('sales_order_items').delete().eq('sales_order_id', editOrder.id);
+      if (delItemsErr) throw delItemsErr;
+      const { error: insertItemsErr } = await supabase.from('sales_order_items').insert(
+        items.filter(i => i.product_name).map(i => ({
+          sales_order_id: editOrder.id,
+          product_id: i.product_id || null,
+          product_name: i.product_name,
+          unit: i.unit,
+          quantity: parseFloat(i.quantity) || 0,
+          unit_price: parseFloat(i.unit_price) || 0,
+          discount_pct: parseFloat(i.discount_pct) || 0,
+          total_price: i.total_price,
+          godown_id: i.godown_id || null,
+        }))
+      );
+      if (insertItemsErr) throw insertItemsErr;
+      setShowModal(false);
+      setEditOrder(null);
+      loadData();
+    } catch (err) {
+      console.error('Failed to update sales order:', err);
+      alert(err instanceof Error ? err.message : 'Failed to update sales order');
+    }
   };
 
   const openEdit = async (order: SalesOrder) => {
@@ -356,31 +365,39 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     try {
       const soId = deleteTarget.id;
 
-      // 1. Delete invoice items + invoices linked to this SO
-      const { data: linkedInvs } = await supabase
+      const { data: linkedInvs, error: invLookupErr } = await supabase
         .from('invoices').select('id').eq('sales_order_id', soId);
+      if (invLookupErr) throw invLookupErr;
       for (const inv of (linkedInvs || [])) {
-        await supabase.from('invoice_items').delete().eq('invoice_id', inv.id);
-        await supabase.from('invoices').delete().eq('id', inv.id);
+        const { error: invItemsErr } = await supabase.from('invoice_items').delete().eq('invoice_id', inv.id);
+        if (invItemsErr) throw invItemsErr;
+        const { error: invDelErr } = await supabase.from('invoices').delete().eq('id', inv.id);
+        if (invDelErr) throw invDelErr;
       }
 
-      // 2. Delete DC items + delivery challans linked to this SO
-      const { data: linkedDCs } = await supabase
+      const { data: linkedDCs, error: dcLookupErr } = await supabase
         .from('delivery_challans').select('id').eq('sales_order_id', soId);
+      if (dcLookupErr) throw dcLookupErr;
       for (const dc of (linkedDCs || [])) {
-        await supabase.from('delivery_challan_items').delete().eq('delivery_challan_id', dc.id);
-        await supabase.from('delivery_challans').delete().eq('id', dc.id);
+        const { error: dcItemsErr } = await supabase.from('delivery_challan_items').delete().eq('delivery_challan_id', dc.id);
+        if (dcItemsErr) throw dcItemsErr;
+        const { error: dcDelErr } = await supabase.from('delivery_challans').delete().eq('id', dc.id);
+        if (dcDelErr) throw dcDelErr;
       }
 
-      // 3. Delete SO items + SO itself (FK now SET NULL on children)
-      await supabase.from('sales_order_items').delete().eq('sales_order_id', soId);
-      await supabase.from('sales_orders').delete().eq('id', soId);
+      const { error: soItemsErr } = await supabase.from('sales_order_items').delete().eq('sales_order_id', soId);
+      if (soItemsErr) throw soItemsErr;
+      const { error: soDelErr } = await supabase.from('sales_orders').delete().eq('id', soId);
+      if (soDelErr) throw soDelErr;
 
-    } finally {
-      setDeleting(false);
       setDeleteTarget(null);
       setLinkedInfo(null);
       loadData();
+    } catch (err) {
+      console.error('Failed to delete sales order:', err);
+      alert(err instanceof Error ? err.message : 'Failed to delete sales order');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -466,18 +483,23 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           );
         }
 
-        for (const item of soItems) {
-          if (!item.product_id) continue;
-          const godownId = (item as any).godown_id || order.godown_id;
-          if (!godownId) continue;
-          await postStockMovement({
-            productId: item.product_id,
-            godownId,
-            qtyChange: -item.quantity,
-            movementType: 'sale',
-            referenceType: 'invoice',
-            referenceId: inv.id,
-            referenceNumber: inv.invoice_number,
+        const dispatchItems = soItems
+          .filter(item => item.product_id)
+          .map(item => {
+            const godownId = (item as any).godown_id || order.godown_id;
+            return godownId
+              ? { product_id: item.product_id!, godown_id: godownId as string, quantity: item.quantity }
+              : null;
+          })
+          .filter((i): i is { product_id: string; godown_id: string; quantity: number } => i !== null && i.quantity > 0);
+
+        if (dispatchItems.length > 0) {
+          await processStockMovement({
+            type: 'dispatch',
+            items: dispatchItems,
+            reference_type: 'invoice',
+            reference_id: inv.id,
+            reference_number: inv.invoice_number,
             notes: `Invoice ${inv.invoice_number} for ${order.customer_name}`,
           });
         }

@@ -8,7 +8,7 @@ import StatusBadge from '../components/ui/StatusBadge';
 import EmptyState from '../components/ui/EmptyState';
 import ActionMenu, { actionEdit, actionDelete } from '../components/ui/ActionMenu';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import { postStockMovement } from '../services/stockLedger';
+import { processStockMovement } from '../services/stockService';
 import { useDateRange } from '../contexts/DateRangeContext';
 import type { PurchaseEntry, Product, Supplier, Godown } from '../types';
 
@@ -58,7 +58,7 @@ export default function Purchase() {
     const [entriesRes, suppliersRes, productsRes, godownsRes] = await Promise.all([
       supabase.from('purchase_entries').select('*').order('created_at', { ascending: false }),
       supabase.from('suppliers').select('*').eq('is_active', true).order('name'),
-      supabase.from('products').select('id, name, unit, purchase_price, stock_quantity').eq('is_active', true),
+      supabase.from('products').select('id, name, unit, purchase_price').eq('is_active', true),
       supabase.from('godowns').select('*').eq('is_active', true).order('name'),
     ]);
     setEntries(entriesRes.data || []);
@@ -172,26 +172,36 @@ export default function Purchase() {
         }));
         await supabase.from('purchase_entry_items').insert(entryItemPayload);
 
-        for (const item of items.filter(i => i.product_id)) {
-          const qty = parseFloat(item.quantity) || 0;
-          if (form.godown_id) {
-            await postStockMovement({
-              productId: item.product_id,
-              godownId: form.godown_id,
-              qtyChange: qty,
-              movementType: 'purchase',
-              referenceType: 'purchase_entry',
-              referenceId: entry.id,
-              referenceNumber: entryNumber,
+        if (form.godown_id) {
+          const stockItems = items
+            .filter(i => i.product_id)
+            .map(i => ({
+              product_id: i.product_id,
+              godown_id: form.godown_id,
+              quantity: parseFloat(i.quantity) || 0,
+              unit_price: parseFloat(i.unit_price) || 0,
+            }))
+            .filter(i => i.quantity > 0);
+          if (stockItems.length > 0) {
+            await processStockMovement({
+              type: 'purchase',
+              items: stockItems,
+              reference_type: 'purchase_entry',
+              reference_id: entry.id,
+              reference_number: entryNumber,
               notes: 'Purchase ' + entryNumber,
             });
           }
+        }
+
+        for (const item of items.filter(i => i.product_id)) {
           const prod = products.find(p => p.id === item.product_id);
           if (parseFloat(item.unit_price) || prod?.purchase_price) {
-            await supabase.from('products').update({
+            const { error: priceErr } = await supabase.from('products').update({
               purchase_price: parseFloat(item.unit_price) || (prod?.purchase_price ?? 0),
               updated_at: new Date().toISOString(),
             }).eq('id', item.product_id);
+            if (priceErr) throw priceErr;
           }
         }
 

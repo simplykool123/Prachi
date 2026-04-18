@@ -12,7 +12,7 @@ import { getSmartRate, updateLastRate } from '../../lib/rateCardService';
 import { fetchCompanies, getCompanyById } from '../../lib/companiesService';
 import type { Company } from '../../lib/companiesService';
 import { fetchGodowns } from '../../services/godownService';
-import { postStockMovement } from '../../services/stockLedger';
+import { processStockMovement } from '../../services/stockService';
 import type { Invoice, Product, Customer, SalesOrder, DeliveryChallan, Godown } from '../../types';
 import type { ActivePage } from '../../types';
 import type { PageState } from '../../App';
@@ -183,7 +183,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
       setShowModal(true);
     };
     loadAndPrefill();
-  }, [prefillFromDC]);
+  }, [prefillFromDC, godowns]);
 
   const [soMap, setSoMap] = useState<Record<string, string>>({});
   const [dcMap, setDcMap] = useState<Record<string, string>>({});
@@ -530,21 +530,32 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
       }))
     );
 
-    for (const item of invItems) {
-      if (item.product_id && item.godown_id) {
-        const qty = parseFloat(item.quantity) || 0;
+    const dispatchItems = invItems
+      .filter(item => item.product_id && item.godown_id)
+      .map(item => ({
+        product_id: item.product_id,
+        godown_id: item.godown_id as string,
+        quantity: parseFloat(item.quantity) || 0,
+        unit_price: parseFloat(item.unit_price) || 0,
+      }))
+      .filter(i => i.quantity > 0);
+
+    if (dispatchItems.length > 0) {
+      await processStockMovement({
+        type: 'dispatch',
+        items: dispatchItems,
+        reference_type: 'invoice',
+        reference_id: inv.id,
+        reference_number: invNumber,
+        notes: 'Invoice ' + invNumber,
+      });
+    }
+
+    if (form.customer_id) {
+      for (const item of invItems) {
+        if (!item.product_id) continue;
         const rate = parseFloat(item.unit_price) || 0;
-        await postStockMovement({
-          productId: item.product_id,
-          godownId: item.godown_id,
-          qtyChange: -qty,
-          movementType: 'sale',
-          referenceType: 'invoice',
-          referenceId: inv.id,
-          referenceNumber: invNumber,
-          notes: 'Invoice ' + invNumber,
-        });
-        if (form.customer_id && rate > 0) await updateLastRate(form.customer_id, item.product_id, rate, 'invoice', inv.id);
+        if (rate > 0) await updateLastRate(form.customer_id, item.product_id, rate, 'invoice', inv.id);
       }
     }
 
@@ -759,18 +770,13 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
 
       const godownId = newEntry.godown_id || oldEntry.godown_id;
       if (godownId) {
-        const { data: gRow } = await supabase.from('godown_stock')
-          .select('quantity').eq('godown_id', godownId).eq('product_id', pid).maybeSingle();
-        const newGodownQty = Math.max(0, (gRow?.quantity || 0) - diff);
-        await supabase.from('godown_stock').upsert({
-          godown_id: godownId, product_id: pid,
-          quantity: newGodownQty, updated_at: new Date().toISOString(),
-        }, { onConflict: 'godown_id,product_id' });
+        await processStockMovement({
+          type: 'adjustment',
+          items: [{ product_id: pid, godown_id: godownId, quantity: -diff }],
+          reference_type: 'invoice_edit',
+          notes: 'Invoice edit diff',
+        });
       }
-
-      const { data: allRows } = await supabase.from('godown_stock').select('quantity').eq('product_id', pid);
-      const newTotal = (allRows || []).reduce((s, r) => s + (r.quantity || 0), 0);
-      await supabase.from('products').update({ stock_quantity: newTotal }).eq('id', pid);
     }
 
     setShowEditModal(false);

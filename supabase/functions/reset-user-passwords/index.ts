@@ -7,51 +7,86 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-const NIKHIL_OLD_ID = "95b25c98-6f7f-488a-8194-733bc3230a7c";
-
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
 
   try {
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: "Missing authorization header" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== "object") {
+      return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { user_id, new_password } = body as { user_id?: string; new_password?: string };
+
+    if (!user_id || typeof user_id !== "string") {
+      return new Response(JSON.stringify({ error: "user_id is required" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (!new_password || typeof new_password !== "string" || new_password.length < 6) {
+      return new Response(JSON.stringify({ error: "new_password must be at least 6 characters" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const callerClient = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+
+    const { data: { user: caller }, error: authErr } = await callerClient.auth.getUser();
+    if (authErr || !caller) {
+      return new Response(JSON.stringify({ error: "Not authenticated" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { data: profile, error: profileErr } = await callerClient
+      .from("user_profiles")
+      .select("role")
+      .eq("id", caller.id)
+      .maybeSingle();
+
+    if (profileErr) {
+      return new Response(JSON.stringify({ error: profileErr.message }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (profile?.role !== "admin") {
+      return new Response(JSON.stringify({ error: "Admin access required" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const adminClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const results = [];
-
-    // Recreate Nikhil: delete old broken record, create fresh one, relink profile
-    const { error: delErr } = await adminClient.auth.admin.deleteUser(NIKHIL_OLD_ID);
-    results.push({ step: "delete_nikhil", error: delErr?.message ?? null });
-
-    const { data: newUser, error: createErr } = await adminClient.auth.admin.createUser({
-      email: "nikhil@prachifulagar.app",
-      password: "Nikhil@2024",
-      email_confirm: true,
-      user_metadata: { display_name: "Nikhil", role: "staff" },
-      app_metadata: { provider: "email", providers: ["email"] },
+    const { error: updateErr } = await adminClient.auth.admin.updateUserById(user_id, {
+      password: new_password,
     });
-    results.push({ step: "create_nikhil", newId: newUser?.user?.id ?? null, error: createErr?.message ?? null });
 
-    if (newUser?.user?.id && newUser.user.id !== NIKHIL_OLD_ID) {
-      // Update user_profiles to point to new ID
-      const { error: profileErr } = await adminClient
-        .from("user_profiles")
-        .update({ id: newUser.user.id })
-        .eq("id", NIKHIL_OLD_ID);
-      results.push({ step: "relink_profile", error: profileErr?.message ?? null });
+    if (updateErr) {
+      return new Response(JSON.stringify({ error: updateErr.message }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    // Verify Prachi still works
-    const { error: prachiErr } = await adminClient.auth.admin.updateUserById(
-      "235b2935-7580-4298-8633-ba19dedfef66",
-      { password: "Prachi@2024" }
-    );
-    results.push({ step: "prachi_password", error: prachiErr?.message ?? null });
-
-    return new Response(JSON.stringify({ results }), {
+    return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
