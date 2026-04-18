@@ -25,7 +25,7 @@ interface LineItem {
   unit: string;
   quantity: string;
   unit_price: string;
-  discount_pct: string;
+  b2b_price: string;
   total_price: number;
   godown_id: string;
 }
@@ -95,7 +95,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     ship_to_pin: '',
     ship_to_phone: '',
   });
-  const [items, setItems] = useState<LineItem[]>([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', discount_pct: '0', total_price: 0, godown_id: '' }]);
+  const [items, setItems] = useState<LineItem[]>([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', total_price: 0, godown_id: '' }]);
 
   useEffect(() => { loadData(); }, []);
 
@@ -165,7 +165,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
 
   const addItem = (focusNew = false) => {
     setItems(prev => {
-      const next = [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '' }];
+      const next = [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', total_price: 0, godown_id: godowns[0]?.id || '' }];
       if (focusNew) {
         const newIdx = next.length - 1;
         setTimeout(() => getProductRef(newIdx).current?.focus(), 30);
@@ -178,7 +178,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const handleProductSelect = useCallback(async (i: number, product: Product) => {
     setItems(prev => {
       const next = [...prev];
-      next[i] = { ...next[i], product_id: product.id, product_name: product.name, unit: product.unit, unit_price: String(product.selling_price), quantity: '1' };
+      next[i] = { ...next[i], product_id: product.id, product_name: product.name, unit: product.unit, unit_price: String(product.selling_price), b2b_price: String(product.selling_price), quantity: '1' };
       const price = product.selling_price;
       next[i].total_price = price;
       return next;
@@ -244,12 +244,11 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       next[i] = { ...next[i], [field]: value };
       if (field === 'product_id') {
         const p = products.find(p => p.id === value);
-        if (p) { next[i].product_name = p.name; next[i].unit = p.unit; next[i].unit_price = String(p.selling_price); }
+        if (p) { next[i].product_name = p.name; next[i].unit = p.unit; next[i].unit_price = String(p.selling_price); next[i].b2b_price = String(p.selling_price); }
       }
       const qty = parseFloat(next[i].quantity) || 0;
       const price = parseFloat(next[i].unit_price) || 0;
-      const disc = parseFloat(next[i].discount_pct) || 0;
-      next[i].total_price = qty * price * (1 - disc / 100);
+      next[i].total_price = qty * price;
       return next;
     });
 
@@ -390,7 +389,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           unit: i.unit,
           quantity: parseFloat(i.quantity) || 0,
           unit_price: parseFloat(i.unit_price) || 0,
-          discount_pct: parseFloat(i.discount_pct) || 0,
+          b2b_price: i.b2b_price !== '' ? parseFloat(i.b2b_price) || null : null,
           godown_id: i.godown_id || null,
         })),
       });
@@ -452,7 +451,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           unit: i.unit,
           quantity: parseFloat(i.quantity) || 0,
           unit_price: parseFloat(i.unit_price) || 0,
-          discount_pct: parseFloat(i.discount_pct) || 0,
+          discount_pct: 0,
+          b2b_price: i.b2b_price !== '' ? parseFloat(i.b2b_price) || null : null,
           total_price: i.total_price,
           godown_id: i.godown_id || null,
         }))
@@ -504,11 +504,11 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
             unit: i.unit,
             quantity: String(i.quantity),
             unit_price: String(i.unit_price),
-            discount_pct: String(i.discount_pct || 0),
+            b2b_price: (i as Record<string, unknown>).b2b_price != null ? String((i as Record<string, unknown>).b2b_price) : String(i.unit_price),
             total_price: i.total_price,
             godown_id: (i as Record<string,string>).godown_id || '',
           }))
-        : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '' }]
+        : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', total_price: 0, godown_id: godowns[0]?.id || '' }]
     );
     setShowModal(true);
   };
@@ -669,7 +669,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
             setEditOrder(null);
             setForm({ customer_id: '', customer_name: '', customer_phone: '', customer_address: '', customer_address2: '', customer_city: '', customer_state: '', customer_pincode: '', so_date: new Date().toISOString().split('T')[0], delivery_date: '', courier_charges: '0', discount_amount: '0', notes: '', godown_id: godowns[0]?.id || '', is_b2b: false, ship_to_mode: 'customer', ship_to_customer_id: '', ship_to_name: '', ship_to_address1: '', ship_to_address2: '', ship_to_city: '', ship_to_state: '', ship_to_pin: '', ship_to_phone: '' });
             setGodownStockMap({});
-            setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', discount_pct: '0', total_price: 0, godown_id: '' }]);
+            setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', total_price: 0, godown_id: '' }]);
             setShowModal(true);
           }} className="btn-primary">
             <Plus className="w-4 h-4" /> New Order
@@ -809,7 +809,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                                 <th className="text-left pb-1 font-semibold tracking-wider">Product</th>
                                 <th className="text-right pb-1 font-semibold tracking-wider w-16">Qty</th>
                                 <th className="text-right pb-1 font-semibold tracking-wider w-20">Unit Price</th>
-                                <th className="text-right pb-1 font-semibold tracking-wider w-16">Disc%</th>
+                                {o.is_b2b && <th className="text-right pb-1 font-semibold tracking-wider w-20">B2B Price</th>}
                                 <th className="text-right pb-1 font-semibold tracking-wider w-24">Total</th>
                               </tr>
                             </thead>
@@ -819,7 +819,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                                   <td className="py-1.5 text-neutral-700 font-medium">{item.product_name}</td>
                                   <td className="py-1.5 text-right text-neutral-600">{item.quantity} {item.unit}</td>
                                   <td className="py-1.5 text-right text-neutral-600">{formatCurrency(item.unit_price)}</td>
-                                  <td className="py-1.5 text-right text-neutral-500">{item.discount_pct}%</td>
+                                  {o.is_b2b && <td className="py-1.5 text-right text-neutral-500">{(item as Record<string,unknown>).b2b_price ? formatCurrency((item as Record<string,unknown>).b2b_price as number) : '-'}</td>}
                                   <td className="py-1.5 text-right font-semibold text-neutral-800">{formatCurrency(item.total_price)}</td>
                                 </tr>
                               ))}
@@ -987,7 +987,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                     <th className="table-header text-left w-32">Godown</th>
                     <th className="table-header text-right w-16">Qty</th>
                     <th className="table-header text-right w-24">Price</th>
-                    <th className="table-header text-right w-16">Disc%</th>
+                    <th className={`table-header text-right w-24 ${!form.is_b2b ? 'hidden' : ''}`}>B2B Price</th>
                     <th className="table-header text-right w-24">Total</th>
                     <th className="table-header w-8" />
                   </tr>
@@ -1029,7 +1029,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                           <input ref={getQtyRef(i)} type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} onKeyDown={e => handleQtyKeyDown(e, i)} className="input text-xs text-right" />
                         </td>
                         <td className="px-3 py-2 w-24"><input type="number" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', e.target.value)} className="input text-xs text-right" /></td>
-                        <td className="px-3 py-2 w-16"><input type="number" value={item.discount_pct} onChange={e => updateItem(i, 'discount_pct', e.target.value)} className="input text-xs text-right" /></td>
+                        <td className={`px-3 py-2 w-24 ${!form.is_b2b ? 'hidden' : ''}`}><input type="number" value={item.b2b_price} onChange={e => updateItem(i, 'b2b_price', e.target.value)} placeholder={item.unit_price} className="input text-xs text-right" /></td>
                         <td className="px-3 py-2 w-24 text-right text-sm font-medium">{formatCurrency(item.total_price)}</td>
                         <td className="px-3 py-2 w-8"><button onClick={() => removeItem(i)} className="text-neutral-400 hover:text-error-500 text-lg leading-none">&times;</button></td>
                       </tr>
