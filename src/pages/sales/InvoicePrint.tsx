@@ -74,7 +74,7 @@ export default function InvoicePrint({ invoice, companyOverride, printMode = 'no
           </div>
           <div className="text-right">
             <p className="text-2xl font-bold text-neutral-700 uppercase tracking-widest">
-              {isB2B ? 'B2B INVOICE' : 'INVOICE'}
+              INVOICE
             </p>
             <p className="text-sm font-semibold text-primary-600 mt-1">#{invoice.invoice_number}</p>
             <p className="text-xs text-neutral-500 mt-0.5">Date: {formatDate(invoice.invoice_date)}</p>
@@ -83,10 +83,10 @@ export default function InvoicePrint({ invoice, companyOverride, printMode = 'no
         </div>
       </div>
 
-      <div className={`grid gap-6 mb-6 ${isB2B && shipToCustomer ? 'grid-cols-3' : 'grid-cols-2'}`}>
+      <div className="grid grid-cols-2 gap-6 mb-6">
         <div>
           <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-2">
-            {isB2B ? 'Seller (Bill To)' : 'Bill From'}
+            {isB2B ? 'Seller' : 'Bill From'}
           </p>
           <div className="bg-neutral-50 rounded-lg p-3">
             <p className="font-semibold text-neutral-900">{sellerName}</p>
@@ -98,7 +98,7 @@ export default function InvoicePrint({ invoice, companyOverride, printMode = 'no
         </div>
         <div>
           <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-2">
-            {isB2B ? 'Buyer (Ship To)' : 'Bill To'}
+            {isB2B ? 'Buyer' : 'Bill To'}
           </p>
           {isB2B ? (
             <div className="bg-blue-50 rounded-lg p-3">
@@ -120,16 +120,6 @@ export default function InvoicePrint({ invoice, companyOverride, printMode = 'no
             </div>
           )}
         </div>
-        {isB2B && shipToCustomer && (
-          <div>
-            <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-2">Invoiced To</p>
-            <div className="bg-primary-50 rounded-lg p-3">
-              <p className="font-semibold text-neutral-900">{invoice.customer_name}</p>
-              {invoice.customer_phone && <p className="text-xs text-neutral-600 mt-1">{invoice.customer_phone}</p>}
-              {customerAddress && <p className="text-xs text-neutral-500 mt-0.5">{customerAddress}</p>}
-            </div>
-          </div>
-        )}
       </div>
 
       <div className="mb-5">
@@ -207,7 +197,9 @@ export default function InvoicePrint({ invoice, companyOverride, printMode = 'no
       </div>
 
       {invoice.notes && <div className="mt-4 text-xs text-neutral-500 border-t border-neutral-100 pt-3"><span className="font-medium text-neutral-700">Notes: </span>{invoice.notes}</div>}
-      <div className="mt-4 text-center text-[10px] text-neutral-400 border-t border-neutral-100 pt-3">{co.footer_note}</div>
+      <div className="mt-4 text-center text-[10px] text-neutral-400 border-t border-neutral-100 pt-3">
+        {isB2B ? `Processed by ${co.name}` : co.footer_note}
+      </div>
     </div>
   );
 }
