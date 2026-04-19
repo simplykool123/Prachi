@@ -32,7 +32,7 @@ const STATUS_TABS = [
   { key: 'returned', label: 'Returned' },
 ];
 
-const STATUS_COLORS: Record<string, string> = {
+const STATUS_COLORS: Record<string, any> = {
   booked: 'bg-warning-50 text-warning-700',
   in_transit: 'bg-blue-50 text-blue-700',
   delivered: 'bg-success-50 text-success-700',

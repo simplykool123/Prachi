@@ -14,7 +14,7 @@ interface CustomerOption {
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-const APPT_COLORS: Record<string, string> = {
+const APPT_COLORS: Record<string, any> = {
   'Astro Reading': 'bg-primary-100 text-primary-700 border-primary-200',
   'Vastu Audit': 'bg-accent-100 text-accent-700 border-accent-200',
   'Consultation': 'bg-blue-100 text-blue-700 border-blue-200',

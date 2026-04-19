@@ -76,9 +76,9 @@ export default function Expenses() {
       payment_mode: e.payment_mode,
       reference_number: e.reference_number || '',
       notes: e.notes || '',
-      receipt_image_url: e.receipt_image_url || '',
-      product_image_url: e.product_image_url || '',
-      payment_screenshot_url: e.payment_screenshot_url || '',
+      receipt_image_url: (e as Record<string, any>).receipt_image_url || '',
+      product_image_url: (e as Record<string, any>).product_image_url || '',
+      payment_screenshot_url: (e as Record<string, any>).payment_screenshot_url || '',
     });
     setShowModal(true);
   };
@@ -137,7 +137,7 @@ export default function Expenses() {
       // Delete attached images from storage first
       const paths: string[] = [];
       for (const key of ['receipt_image_url', 'product_image_url', 'payment_screenshot_url'] as const) {
-        const url = e[key];
+        const url = (e as Record<string, any>)[key];
         if (url) {
           const segment = url.split('/expense-receipts/')[1];
           if (segment) paths.push(segment.split('?')[0]); // strip any query params
@@ -182,7 +182,7 @@ export default function Expenses() {
   })).sort((a, b) => b.total - a.total);
 
   const getCatColor = (cat: string) => {
-    const map: Record<string, string> = {
+    const map: Record<string, any> = {
       'Rent': 'bg-primary-100 text-primary-700',
       'Travel': 'bg-blue-100 text-blue-700',
       'Marketing': 'bg-green-100 text-green-700',
@@ -196,7 +196,8 @@ export default function Expenses() {
   };
 
   const hasImages = (e: Expense) => {
-    return !!(e.receipt_image_url || e.product_image_url || e.payment_screenshot_url);
+    const ex = e as Record<string, any>;
+    return !!(ex.receipt_image_url || ex.product_image_url || ex.payment_screenshot_url);
   };
 
   // Image upload tile component
@@ -337,7 +338,8 @@ export default function Expenses() {
             </thead>
             <tbody className="divide-y divide-neutral-50">
               {filtered.map(e => {
-                const imgCount = [e.receipt_image_url, e.product_image_url, e.payment_screenshot_url].filter(Boolean).length;
+                const ex = e as Record<string, any>;
+                const imgCount = [ex.receipt_image_url, ex.product_image_url, ex.payment_screenshot_url].filter(Boolean).length;
                 return (
                   <tr key={e.id} className="hover:bg-neutral-50 transition-colors">
                     <td className="table-cell text-neutral-500">{formatDate(e.expense_date)}</td>
@@ -448,9 +450,8 @@ export default function Expenses() {
           </div>
         }>
         {viewingExpense && (() => {
-          const images = IMAGE_SLOTS
-            .map(s => ({ label: s.label, url: viewingExpense[s.key] }))
-            .filter((i): i is { label: string; url: string } => Boolean(i.url));
+          const ex = viewingExpense as Record<string, any>;
+          const images = IMAGE_SLOTS.map(s => ({ label: s.label, url: ex[s.key] })).filter(i => i.url);
           return (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">

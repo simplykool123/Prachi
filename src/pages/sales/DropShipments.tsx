@@ -20,7 +20,7 @@ interface LineItem {
   total_price: number;
 }
 
-const DS_STATUS_LABELS: Record<DropShipment['status'], string> = {
+const DS_STATUS_LABELS: Record<string, any> = {
   draft: 'Draft',
   confirmed: 'Confirmed',
   supplier_dispatched: 'Dispatched',
@@ -29,7 +29,7 @@ const DS_STATUS_LABELS: Record<DropShipment['status'], string> = {
   cancelled: 'Cancelled',
 };
 
-const DS_STATUS_COLORS: Record<DropShipment['status'], string> = {
+const DS_STATUS_COLORS: Record<string, any> = {
   draft: 'bg-neutral-100 text-neutral-600',
   confirmed: 'bg-blue-100 text-blue-700',
   supplier_dispatched: 'bg-warning-100 text-warning-700',

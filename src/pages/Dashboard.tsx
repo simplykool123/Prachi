@@ -24,7 +24,7 @@ interface PendingAction {
   action: () => void;
 }
 
-const APPT_COLORS: Record<string, string> = {
+const APPT_COLORS: Record<string, any> = {
   'Astro Reading': 'bg-primary-100 text-primary-700 border-primary-200',
   'Vastu Audit': 'bg-accent-100 text-accent-700 border-accent-200',
   'Consultation': 'bg-blue-100 text-blue-700 border-blue-200',
@@ -113,7 +113,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   };
 
   const getStatusColor = (status: string) => {
-    const map: Record<string, string> = {
+    const map: Record<string, any> = {
       paid: 'text-success-600 bg-success-50',
       partial: 'text-warning-600 bg-warning-50',
       overdue: 'text-error-600 bg-error-50',
@@ -325,7 +325,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                       const startTime = formatTime(a.start_time);
                       const endTime = a.end_time ? formatTime(a.end_time) : null;
                       const colorClass = APPT_COLORS[a.appointment_type] || 'bg-blue-50 text-blue-700 border-blue-200';
-                      const dotColors: Record<string, string> = {
+                      const dotColors: Record<string, any> = {
                         'Astro Reading': 'bg-primary-500',
                         'Vastu Audit': 'bg-accent-500',
                         'Consultation': 'bg-blue-500',

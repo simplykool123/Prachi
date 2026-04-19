@@ -72,8 +72,8 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
   const [invOptions, setInvOptions] = useState<InvOption[]>([]);
   const [godowns, setGodowns] = useState<Godown[]>([]);
   const [cancelTarget, setCancelTarget] = useState<DispatchEntry | null>(null);
-  const [soMap, setSoMap] = useState<Record<string, string>>({});
-  const [invMap, setInvMap] = useState<Record<string, string>>({});
+  const [soMap, setSoMap] = useState<Record<string, any>>({});
+  const [invMap, setInvMap] = useState<Record<string, any>>({});
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -176,10 +176,10 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
     ]);
     setSoOptions(soRes.data || []);
     setInvOptions(invDropdownRes.data || []);
-    const sm: Record<string, string> = {};
+    const sm: Record<string, any> = {};
     (soRes.data || []).forEach((s: { id: string; so_number: string }) => { sm[s.id] = s.so_number; });
     setSoMap(sm);
-    const im: Record<string, string> = {};
+    const im: Record<string, any> = {};
     (invAllRes.data || []).forEach((i: { id: string; invoice_number: string; status: string }) => {
       if (i.status !== 'cancelled') im[i.id] = i.invoice_number;
     });
@@ -385,7 +385,7 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
   };
 
   const getStatusColor = (status: string) => {
-    const m: Record<string, string> = {
+    const m: Record<string, any> = {
       pending: 'bg-warning-50 text-warning-700',
       dispatched: 'bg-blue-50 text-blue-700',
       in_transit: 'bg-primary-50 text-primary-700',

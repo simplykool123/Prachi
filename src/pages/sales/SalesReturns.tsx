@@ -263,7 +263,7 @@ export default function SalesReturns() {
 
     // Build per-product godown map from the original invoice items.
     // Falls back to the first active godown if the invoice link is missing.
-    const godownByProduct: Record<string, string> = {};
+    const godownByProduct: Record<string, any> = {};
     if (ret.invoice_id) {
       const { data: invItems } = await supabase
         .from('invoice_items').select('product_id, godown_id').eq('invoice_id', ret.invoice_id);

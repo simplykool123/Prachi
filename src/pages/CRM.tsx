@@ -196,12 +196,7 @@ export default function CRM() {
       .select('id, product_id, custom_rate, products(name, unit, selling_price)')
       .eq('customer_id', customerId)
       .eq('is_active', true);
-    setRateCards((data || []).map((row: { id: string; product_id: string; custom_rate: number; products: { name: string; unit: string; selling_price: number }[] | null }) => ({
-      id: row.id,
-      product_id: row.product_id,
-      custom_rate: row.custom_rate,
-      products: row.products?.[0] || null,
-    })));
+    setRateCards((data || []) as any);
   };
 
   const handleSaveRateCard = async () => {

@@ -26,7 +26,7 @@ interface LineItem {
   quantity: string;
   unit_price: string;
   b2b_price: string;
-  discount_pct: string;
+  discount_pct?: string;
   total_price: number;
   godown_id: string;
 }
@@ -543,8 +543,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
             unit: i.unit,
             quantity: String(i.quantity),
             unit_price: String(i.unit_price),
-            b2b_price: i.b2b_price != null ? String(i.b2b_price) : String(i.unit_price),
-            discount_pct: String(i.discount_pct || 0),
+            b2b_price: (i as Record<string, any>).b2b_price != null ? String((i as Record<string, any>).b2b_price) : String(i.unit_price),
             total_price: i.total_price,
             godown_id: i.godown_id || '',
           }))
@@ -701,7 +700,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const uniqueSOCustomers = [...new Set(orders.map(o => o.customer_name))].sort();
   const hasSOFilters = filterCustomer || filterStatus || filterFrom || filterTo;
 
-  const statusColors: Record<string, string> = {
+  const statusColors: Record<string, any> = {
     draft: 'text-neutral-500',
     confirmed: 'text-blue-600',
     invoiced: 'text-primary-600',

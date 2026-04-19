@@ -1,6 +1,30 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
-import type { CompanySettings } from '../types';
+
+export interface CompanySettings {
+  id: number;
+  name: string;
+  tagline: string;
+  address1: string;
+  address2: string;
+  city: string;
+  state: string;
+  pincode: string;
+  phone: string;
+  alt_phone: string;
+  email: string;
+  website: string;
+  gstin: string;
+  pan: string;
+  bank_name: string;
+  account_number: string;
+  ifsc_code: string;
+  account_holder: string;
+  upi_id: string;
+  logo_url?: string;
+  footer_note: string;
+  updated_at: string;
+}
 
 export const DEFAULT_COMPANY: CompanySettings = {
   id: 1,

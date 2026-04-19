@@ -2,14 +2,14 @@ export interface Product {
   company_id?: string;
   company_name?: string; // joined when needed
   id: string;
-  sku: string;
+  sku?: string;
   name: string;
-  category: 'Astro Products' | 'Vastu Items' | 'Healing Items';
+  category?: 'Astro Products' | 'Vastu Items' | 'Healing Items';
   unit: string;
-  purchase_price: number;
-  selling_price: number;
-  stock_quantity: number;
-  low_stock_alert: number;
+  purchase_price?: number;
+  selling_price?: number;
+  stock_quantity?: number;
+  low_stock_alert?: number;
   description?: string;
   image_url?: string;
   direction?: string;
@@ -18,9 +18,9 @@ export interface Product {
   total_weight?: number;
   remaining_weight?: number;
   weight_unit?: 'grams' | 'carats';
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
+  is_active?: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface ProductRecommendation {
@@ -180,12 +180,12 @@ export interface Customer {
   state?: string;
   pincode?: string;
   gstin?: string;
-  category: 'B2B' | 'B2C';
-  tags: string[];
+  category?: 'B2B' | 'B2C';
+  tags?: string[];
   notes?: string;
-  opening_balance: number;
-  balance: number;
-  total_revenue: number;
+  opening_balance?: number;
+  balance?: number;
+  total_revenue?: number;
   last_interaction?: string;
   project_status?: string;
   conversion_stage?: 'Lead' | 'Interested' | 'Site Visit Done' | 'Proposal Given' | 'Converted' | 'Lost';
@@ -193,8 +193,8 @@ export interface Customer {
   next_followup_date?: string;
   customer_score?: number;
   last_interaction_date?: string;
-  is_active: boolean;
-  created_at: string;
+  is_active?: boolean;
+  created_at?: string;
 }
 
 export interface VastuPlan {
@@ -211,6 +211,7 @@ export interface VastuPlan {
 }
 
 export interface SalesOrder {
+  [key: string]: any;
   id: string;
   so_number: string;
   customer_id?: string;
@@ -244,6 +245,7 @@ export interface SalesOrder {
 }
 
 export interface SalesOrderItem {
+  [key: string]: any;
   id: string;
   sales_order_id: string;
   product_id?: string;
@@ -258,6 +260,7 @@ export interface SalesOrderItem {
 }
 
 export interface Invoice {
+  [key: string]: any;
   id: string;
   invoice_number: string;
   sales_order_id?: string;
@@ -270,23 +273,23 @@ export interface Invoice {
   customer_city?: string;
   customer_state?: string;
   customer_pincode?: string;
-  invoice_date: string;
+  invoice_date?: string;
   due_date?: string;
-  status: 'draft' | 'issued' | 'sent' | 'partial' | 'paid' | 'overdue' | 'cancelled';
-  subtotal: number;
-  tax_amount: number;
-  courier_charges: number;
-  discount_amount: number;
-  total_amount: number;
-  paid_amount: number;
-  outstanding_amount: number;
+  status?: 'draft' | 'issued' | 'sent' | 'partial' | 'paid' | 'overdue' | 'cancelled';
+  subtotal?: number;
+  tax_amount?: number;
+  courier_charges?: number;
+  discount_amount?: number;
+  total_amount?: number;
+  paid_amount?: number;
+  outstanding_amount?: number;
   payment_terms?: string;
   notes?: string;
   bank_name?: string;
   account_number?: string;
   ifsc_code?: string;
   items?: InvoiceItem[];
-  created_at: string;
+  created_at?: string;
 }
 
 export interface InvoiceItem {
@@ -338,7 +341,7 @@ export interface DeliveryChallan {
 export interface DeliveryChallanItem {
   id?: string;
   delivery_challan_id?: string;
-  product_id?: string | null;
+  product_id?: string;
   product_name: string;
   unit: string;
   quantity: number;
@@ -436,6 +439,7 @@ export interface TravelPlan {
 }
 
 export interface Expense {
+  [key: string]: any;
   id: string;
   expense_number: string;
   expense_date: string;
@@ -497,31 +501,6 @@ export interface UserProfile {
   email: string;
   created_at: string;
   last_sign_in?: string;
-}
-
-export interface CompanySettings {
-  id: number;
-  name: string;
-  tagline: string;
-  address1: string;
-  address2: string;
-  city: string;
-  state: string;
-  pincode: string;
-  phone: string;
-  alt_phone: string;
-  email: string;
-  website: string;
-  gstin: string;
-  pan: string;
-  bank_name: string;
-  account_number: string;
-  ifsc_code: string;
-  account_holder: string;
-  upi_id: string;
-  logo_url?: string;
-  footer_note: string;
-  updated_at: string;
 }
 
 export interface Godown {
