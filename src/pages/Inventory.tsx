@@ -287,14 +287,23 @@ export default function Inventory() {
         });
       }
 
-    if (selectedProduct.is_gemstone && selectedProduct.total_weight) {
-      const updates: Record<string, any> = { updated_at: new Date().toISOString() };
-      if (isIn) {
-        updates.remaining_weight = (selectedProduct.remaining_weight || 0) + qty;
-        updates.total_weight = (selectedProduct.total_weight || 0) + (mvType === 'purchase' ? qty : 0);
-      } else if (mvType !== 'adjustment') {
-        updates.remaining_weight = Math.max(0, (selectedProduct.remaining_weight || 0) - qty);
+      if (selectedProduct.is_gemstone && selectedProduct.total_weight) {
+        const updates: Record<string, any> = { updated_at: new Date().toISOString() };
+        if (isIn) {
+          updates.remaining_weight = (selectedProduct.remaining_weight || 0) + qty;
+          updates.total_weight = (selectedProduct.total_weight || 0) + (mvType === 'purchase' ? qty : 0);
+        } else if (mvType !== 'adjustment') {
+          updates.remaining_weight = Math.max(0, (selectedProduct.remaining_weight || 0) - qty);
+        }
+        await supabase.from('products').update(updates).eq('id', selectedProduct.id);
       }
+
+      await loadData();
+      setShowStockModal(false);
+      setSelectedProduct(null);
+    } catch (error) {
+      console.error('Error updating stock:', error);
+      alert('Failed to update stock. Please try again.');
     }
   };
 
