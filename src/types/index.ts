@@ -242,7 +242,7 @@ export interface SalesOrder {
   created_at: string;
 }
 
-export interface SalesOrderItem {  // godown_id added per DB migration
+export interface SalesOrderItem {
   id: string;
   sales_order_id: string;
   product_id?: string;
@@ -252,6 +252,7 @@ export interface SalesOrderItem {  // godown_id added per DB migration
   unit_price: number;
   discount_pct: number;
   total_price: number;
+  godown_id?: string;
 }
 
 export interface Invoice {
@@ -298,6 +299,7 @@ export interface InvoiceItem {
   discount_pct: number;
   tax_pct: number;
   total_price: number;
+  godown_id?: string;
 }
 
 export interface DeliveryChallan {
@@ -338,6 +340,9 @@ export interface DeliveryChallanItem {
   product_name: string;
   unit: string;
   quantity: number;
+  unit_price?: number;
+  discount_pct?: number;
+  godown_id?: string;
 }
 
 export interface Payment {
@@ -477,6 +482,7 @@ export interface AutomationRule {
 export interface UserProfile {
   id: string;
   role: 'admin' | 'staff' | 'accountant' | 'user';
+  username: string;
   display_name: string;
   email: string;
   created_at: string;
