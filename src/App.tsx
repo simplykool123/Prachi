@@ -4,6 +4,7 @@ import { DateRangeProvider } from './contexts/DateRangeContext';
 import { ToastProvider } from './components/ui/Toast';
 import DateRangeBar from './components/layout/DateRangeBar';
 import Sidebar from './components/layout/Sidebar';
+import AppLoader from './components/AppLoader';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
@@ -55,20 +56,11 @@ const PAGE_TITLES: Partial<Record<ActivePage, string>> = {
 };
 
 function AppShell() {
-  const { user, loading, isAdmin, canAccessFinance, canAccessSales, canAccessInventory, canAccessExpenses } = useAuth();
+  const { user, isAuthLoading, isAdmin, canAccessFinance, canAccessSales, canAccessInventory, canAccessExpenses } = useAuth();
   const [activePage, setActivePage] = useState<ActivePage>('dashboard');
   const [pageState, setPageState] = useState<PageState>({});
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-neutral-50">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 rounded-full border-2 border-primary-600 border-t-transparent animate-spin" />
-          <p className="text-xs text-neutral-400">Loading...</p>
-        </div>
-      </div>
-    );
-  }
+  if (isAuthLoading) return <AppLoader />;
 
   if (!user) return <Login />;
 
