@@ -26,6 +26,7 @@ interface LineItem {
   quantity: string;
   unit_price: string;
   b2b_price: string;
+  discount_pct: string;
   total_price: number;
   godown_id: string;
 }
@@ -97,7 +98,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     ship_to_pin: '',
     ship_to_phone: '',
   });
-  const [items, setItems] = useState<LineItem[]>([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', total_price: 0, godown_id: '' }]);
+  const [items, setItems] = useState<LineItem[]>([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', discount_pct: '0', total_price: 0, godown_id: '' }]);
 
   useEffect(() => { loadData(); }, []);
 
@@ -138,8 +139,37 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       fetchGodowns(),
     ]);
     setOrders(ordersRes.data || []);
-    setProducts(productsRes.data || []);
-    setCustomers(customersRes.data || []);
+    setProducts(((productsRes.data || []) as Array<{ id: string; name: string; unit: string; selling_price: number; stock_quantity: number }>).map(p => ({
+      id: p.id,
+      name: p.name,
+      unit: p.unit,
+      selling_price: p.selling_price,
+      stock_quantity: p.stock_quantity,
+      sku: '',
+      category: 'Astro Products',
+      purchase_price: 0,
+      low_stock_alert: 0,
+      is_active: true,
+      created_at: '',
+      updated_at: '',
+    })));
+    setCustomers(((customersRes.data || []) as Array<{ id: string; name: string; phone?: string; address?: string; address2?: string; city?: string; state?: string; pincode?: string; balance?: number; total_revenue?: number }>).map(c => ({
+      id: c.id,
+      name: c.name,
+      phone: c.phone || '',
+      address: c.address || '',
+      address2: c.address2 || '',
+      city: c.city || '',
+      state: c.state || '',
+      pincode: c.pincode || '',
+      balance: c.balance || 0,
+      total_revenue: c.total_revenue || 0,
+      category: 'B2C',
+      tags: [],
+      opening_balance: 0,
+      is_active: true,
+      created_at: '',
+    })));
     setGodowns(godownsData);
     if (godownsData.length > 0) {
       setForm(f => ({ ...f, godown_id: f.godown_id || godownsData[0].id }));
@@ -174,7 +204,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
 
   const addItem = (focusNew = false) => {
     setItems(prev => {
-      const next = [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', total_price: 0, godown_id: godowns[0]?.id || '' }];
+      const next = [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '' }];
       if (focusNew) {
         const newIdx = next.length - 1;
         setTimeout(() => getProductRef(newIdx).current?.focus(), 30);
@@ -288,7 +318,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
             const next = [...prev];
             next[i] = { ...next[i], unit_price: String(smartRate) };
             const qty = parseFloat(next[i].quantity) || 0;
-            const disc = parseFloat(next[i].discount_pct) || 0;
+            const disc = parseFloat(next[i].discount_pct || '0') || 0;
             next[i].total_price = qty * smartRate * (1 - disc / 100);
             return next;
           });
@@ -513,11 +543,12 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
             unit: i.unit,
             quantity: String(i.quantity),
             unit_price: String(i.unit_price),
-            b2b_price: (i as Record<string, unknown>).b2b_price != null ? String((i as Record<string, unknown>).b2b_price) : String(i.unit_price),
+            b2b_price: i.b2b_price != null ? String(i.b2b_price) : String(i.unit_price),
+            discount_pct: String(i.discount_pct || 0),
             total_price: i.total_price,
-            godown_id: (i as Record<string,string>).godown_id || '',
+            godown_id: i.godown_id || '',
           }))
-        : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', total_price: 0, godown_id: godowns[0]?.id || '' }]
+        : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '' }]
     );
     setShowModal(true);
   };
@@ -569,6 +600,19 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
         if (dc.status !== 'cancelled') {
           await cancelDeliveryChallan(dc.id);
         }
+      }
+
+      // 2.5 Safety verification: ensure all linked docs are now cancelled
+      const { data: verifyInvs, error: verifyInvErr } = await supabase
+        .from('invoices').select('id, status').eq('sales_order_id', soId);
+      if (verifyInvErr) throw verifyInvErr;
+      const { data: verifyDCs, error: verifyDCErr } = await supabase
+        .from('delivery_challans').select('id, status').eq('sales_order_id', soId);
+      if (verifyDCErr) throw verifyDCErr;
+      const hasActiveInvoice = (verifyInvs || []).some(inv => inv.status !== 'cancelled');
+      const hasActiveChallan = (verifyDCs || []).some(dc => dc.status !== 'cancelled');
+      if (hasActiveInvoice || hasActiveChallan) {
+        throw new Error('Cancel safety check failed. Linked documents must be cancelled before deleting this order.');
       }
 
       // 3. Hard-delete documents (cancel RPCs soft-cancelled them; now remove rows).
@@ -688,7 +732,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
             setEditOrder(null);
             setForm({ customer_id: '', customer_name: '', customer_phone: '', customer_address: '', customer_address2: '', customer_city: '', customer_state: '', customer_pincode: '', so_date: new Date().toISOString().split('T')[0], delivery_date: '', courier_charges: '0', discount_amount: '0', notes: '', godown_id: godowns[0]?.id || '', is_b2b: false, ship_to_mode: 'customer', ship_to_customer_id: '', ship_to_name: '', ship_to_address1: '', ship_to_address2: '', ship_to_city: '', ship_to_state: '', ship_to_pin: '', ship_to_phone: '' });
             setGodownStockMap({});
-            setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', total_price: 0, godown_id: '' }]);
+            setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', discount_pct: '0', total_price: 0, godown_id: '' }]);
             setShowModal(true);
           }} className="btn-primary">
             <Plus className="w-4 h-4" /> New Order
@@ -837,7 +881,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                                   <td className="py-1.5 text-neutral-700 font-medium">{item.product_name}</td>
                                   <td className="py-1.5 text-right text-neutral-600">{item.quantity} {item.unit}</td>
                                   <td className="py-1.5 text-right text-neutral-600">{formatCurrency(item.unit_price)}</td>
-                                  {o.is_b2b && <td className="py-1.5 text-right text-neutral-500">{(item as Record<string,unknown>).b2b_price ? formatCurrency((item as Record<string,unknown>).b2b_price as number) : '-'}</td>}
+                                  {o.is_b2b && <td className="py-1.5 text-right text-neutral-500">{item.b2b_price ? formatCurrency(item.b2b_price) : '-'}</td>}
                                   <td className="py-1.5 text-right font-semibold text-neutral-800">{formatCurrency(item.total_price)}</td>
                                 </tr>
                               ))}
@@ -995,7 +1039,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <p className="text-xs font-semibold text-neutral-600 uppercase tracking-wide">Items</p>
-              <button onClick={addItem} className="btn-ghost text-xs"><Plus className="w-3.5 h-3.5" /> Add Item</button>
+              <button onClick={() => addItem()} className="btn-ghost text-xs"><Plus className="w-3.5 h-3.5" /> Add Item</button>
             </div>
             <div className="border border-neutral-200 rounded-lg overflow-visible">
               <table className="w-full">
@@ -1014,7 +1058,6 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                   {items.map((item, i) => {
                     const stock = getStockForItem(item);
                     const qty = parseFloat(item.quantity) || 0;
-                    const overStock = stock !== null && qty > stock;
                     return (
                       <tr key={i} className="border-t border-neutral-100">
                         <td className="px-3 py-2">

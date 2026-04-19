@@ -6,8 +6,15 @@ import Modal from '../../components/ui/Modal';
 import EmptyState from '../../components/ui/EmptyState';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { useDateRange } from '../../contexts/DateRangeContext';
-import type { Godown, Product } from '../../types';
+import type { Godown } from '../../types';
 import { processStockMovement } from '../../services/stockService';
+
+interface ProductOption {
+  id: string;
+  name: string;
+  unit: string;
+  stock_quantity: number;
+}
 
 interface TransferItem {
   product_id: string;
@@ -45,7 +52,7 @@ export default function GodownTransfer() {
   const { dateRange } = useDateRange();
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [godowns, setGodowns] = useState<Godown[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
+  const [products, setProducts] = useState<ProductOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -81,8 +88,8 @@ export default function GodownTransfer() {
         .order('created_at', { ascending: false }),
     ]);
     setGodowns(godownsRes.data || []);
-    setProducts(productsRes.data || []);
-    if (transfersRes.error && (transfersRes.error as any).code === 'PGRST205') {
+    setProducts((productsRes.data || []) as ProductOption[]);
+    if (transfersRes.error && 'code' in transfersRes.error && transfersRes.error.code === 'PGRST205') {
       setTablesMissing(true);
     } else {
       setTablesMissing(false);
@@ -558,6 +565,7 @@ create policy "Allow all for authenticated" on godown_transfer_items for all to 
         isOpen={!!confirmCancel}
         title="Cancel Transfer"
         message="This action cannot be undone."
+        onClose={() => setConfirmCancel(null)}
         onConfirm={() => setConfirmCancel(null)}
         onCancel={() => setConfirmCancel(null)}
       />

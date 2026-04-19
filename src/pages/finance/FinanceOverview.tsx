@@ -17,6 +17,16 @@ interface MonthData {
   profit: number;
 }
 
+interface KpiItem {
+  label: string;
+  value: number;
+  icon: React.ComponentType<{ className?: string }>;
+  color: string;
+  bg: string;
+  show: boolean;
+  isPercent?: boolean;
+}
+
 export default function FinanceOverview({ onNavigate }: FinanceOverviewProps) {
   const { dateRange } = useDateRange();
   const { isAdmin } = useAuth();
@@ -89,7 +99,7 @@ export default function FinanceOverview({ onNavigate }: FinanceOverviewProps) {
 
   const maxRevenue = Math.max(...monthlyData.map(m => m.revenue), 1);
 
-  const kpiItems: any[] = [
+  const kpiItems: KpiItem[] = [
     { label: 'Total Revenue Collected', value: stats.totalRevenue, icon: TrendingUp, color: 'text-success-600', bg: 'bg-success-50', show: true },
     { label: 'Total Profit', value: stats.totalProfit, icon: DollarSign, color: stats.totalProfit >= 0 ? 'text-success-600' : 'text-error-600', bg: stats.totalProfit >= 0 ? 'bg-success-50' : 'bg-error-50', show: isAdmin },
     { label: 'Total Expenses', value: stats.totalExpenses, icon: TrendingDown, color: 'text-error-600', bg: 'bg-error-50', show: true },
@@ -114,7 +124,7 @@ export default function FinanceOverview({ onNavigate }: FinanceOverviewProps) {
 
       <div className="p-6 space-y-5">
         <div className="grid grid-cols-3 gap-4">
-          {kpiItems.map((kpi: any) => (
+          {kpiItems.map(kpi => (
             <div key={kpi.label} className="card">
               <div className="flex items-center justify-between mb-2">
                 <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">{kpi.label}</p>

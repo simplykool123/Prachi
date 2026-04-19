@@ -131,7 +131,7 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
         .in('id', soIds);
 
       const shipToIds = [...new Set((soRows || []).map((s: { ship_to_customer_id?: string | null }) => s.ship_to_customer_id).filter(Boolean))] as string[];
-      let shipToNames: Record<string, string> = {};
+      const shipToNames: Record<string, string> = {};
       if (shipToIds.length > 0) {
         const { data: custRows } = await supabase
           .from('customers')
@@ -186,6 +186,23 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
     setInvMap(im);
   };
 
+  const canMarkOrderCompleted = async (salesOrderId: string): Promise<{ ok: boolean; reason?: string }> => {
+    const { data: invoices, error } = await supabase
+      .from('invoices')
+      .select('status, outstanding_amount')
+      .eq('sales_order_id', salesOrderId)
+      .neq('status', 'cancelled');
+    if (error) return { ok: false, reason: error.message };
+    if (!invoices || invoices.length === 0) {
+      return { ok: false, reason: 'Cannot mark order as completed: invoice not found.' };
+    }
+    const hasFullyPaidInvoice = invoices.some(inv => inv.status === 'paid' && (inv.outstanding_amount || 0) <= 0);
+    if (!hasFullyPaidInvoice) {
+      return { ok: false, reason: 'Cannot mark order as completed: invoice is not fully paid.' };
+    }
+    return { ok: true };
+  };
+
   const openAdd = () => {
     setEditing(null);
     setForm({ ...emptyForm, dispatch_date: new Date().toISOString().split('T')[0] });
@@ -238,6 +255,13 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
 
     try {
       if (editing) {
+        if (form.status === 'delivered' && form.reference_type === 'sales_order' && form.sales_order_id) {
+          const completionCheck = await canMarkOrderCompleted(form.sales_order_id);
+          if (!completionCheck.ok) {
+            alert(completionCheck.reason || 'Cannot mark order as completed.');
+            return;
+          }
+        }
         const { error: updateErr } = await supabase.from('dispatch_entries').update(payload).eq('id', editing.id);
         if (updateErr) throw updateErr;
         if (form.status === 'delivered') {
@@ -281,6 +305,13 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
   };
 
   const markDelivered = async (d: DispatchEntry) => {
+    if (d.sales_order_id) {
+      const completionCheck = await canMarkOrderCompleted(d.sales_order_id);
+      if (!completionCheck.ok) {
+        alert(completionCheck.reason || 'Cannot mark order as completed.');
+        return;
+      }
+    }
     await supabase.from('dispatch_entries').update({ status: 'delivered', updated_at: new Date().toISOString() }).eq('id', d.id);
     if (d.sales_order_id) await supabase.from('sales_orders').update({ status: 'delivered' }).eq('id', d.sales_order_id);
     await loadDispatches();
@@ -306,10 +337,15 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
   const confirmDelivered = async () => {
     if (!deliverTarget) return;
     const { entry } = deliverTarget;
-    await supabase.from('dispatch_entries').update({ status: 'delivered', updated_at: new Date().toISOString() }).eq('id', entry.id);
     if (entry.sales_order_id) {
-      await supabase.from('sales_orders').update({ status: 'delivered' }).eq('id', entry.sales_order_id);
+      const completionCheck = await canMarkOrderCompleted(entry.sales_order_id);
+      if (!completionCheck.ok) {
+        alert(completionCheck.reason || 'Cannot mark order as completed.');
+        return;
+      }
     }
+    await supabase.from('dispatch_entries').update({ status: 'delivered', updated_at: new Date().toISOString() }).eq('id', entry.id);
+    if (entry.sales_order_id) await supabase.from('sales_orders').update({ status: 'delivered' }).eq('id', entry.sales_order_id);
     setDeliverTarget(null);
     await loadDispatches();
   };
@@ -471,7 +507,7 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
                 <tbody>
                   {filtered.map(d => {
                     const isDelivered = d.status === 'delivered';
-                    const isCancelled = d.status === 'cancelled';
+                    const isCancelled = (d.status as string) === 'cancelled';
                     const isLocked = isDelivered || isCancelled;
                     return (
                       <tr key={d.id} className={`border-b border-neutral-50 hover:bg-neutral-50 transition-colors ${isCancelled ? 'opacity-50 bg-neutral-50' : isDelivered ? 'opacity-70' : ''}`}>

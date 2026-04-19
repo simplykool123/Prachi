@@ -8,8 +8,23 @@ import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
 import ActionMenu, { actionView, actionEdit, actionDelete } from '../../components/ui/ActionMenu';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
-import type { SalesReturn, SalesReturnItem, Invoice, Product } from '../../types';
+import type { SalesReturn, SalesReturnItem } from '../../types';
 import { processStockMovement } from '../../services/stockService';
+
+interface InvoiceOption {
+  id: string;
+  invoice_number: string;
+  customer_name: string;
+  customer_id?: string;
+}
+
+interface ProductOption {
+  id: string;
+  name: string;
+  unit: string;
+  selling_price: number;
+  stock_quantity: number;
+}
 
 interface ReturnLineItem {
   product_id: string;
@@ -31,8 +46,8 @@ export default function SalesReturns() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [selectedReturn, setSelectedReturn] = useState<SalesReturn | null>(null);
   const [viewItems, setViewItems] = useState<SalesReturnItem[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
+  const [invoices, setInvoices] = useState<InvoiceOption[]>([]);
+  const [products, setProducts] = useState<ProductOption[]>([]);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [rowItems, setRowItems] = useState<Record<string, SalesReturnItem[]>>({});
 
@@ -60,8 +75,8 @@ export default function SalesReturns() {
       supabase.from('products').select('id, name, unit, selling_price, stock_quantity').eq('is_active', true),
     ]);
     setReturns(returnsRes.data || []);
-    setInvoices(invoicesRes.data || []);
-    setProducts(productsRes.data || []);
+    setInvoices((invoicesRes.data || []) as InvoiceOption[]);
+    setProducts((productsRes.data || []) as ProductOption[]);
   };
 
   const toggleExpand = async (id: string) => {

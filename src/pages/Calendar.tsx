@@ -4,7 +4,12 @@ import { supabase } from '../lib/supabase';
 import { formatDate } from '../lib/utils';
 import Modal from '../components/ui/Modal';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import type { Appointment, TravelPlan, Customer } from '../types';
+import type { Appointment, TravelPlan } from '../types';
+
+interface CustomerOption {
+  id: string;
+  name: string;
+}
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -36,7 +41,7 @@ export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [travelPlans, setTravelPlans] = useState<TravelPlan[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [showModal, setShowModal] = useState(false);
   const [showTravelModal, setShowTravelModal] = useState(false);
@@ -61,7 +66,7 @@ export default function CalendarPage() {
     ]);
     setAppointments(apptRes.data || []);
     setTravelPlans(travelRes.data || []);
-    setCustomers(customersRes.data || []);
+    setCustomers((customersRes.data || []) as CustomerOption[]);
   };
 
   const getDaysInMonth = () => {

@@ -5,8 +5,19 @@ import { formatCurrency, formatDate, generateId } from '../lib/utils';
 import { useCompanySettings } from '../lib/useCompanySettings';
 import Modal from '../components/ui/Modal';
 import EmptyState from '../components/ui/EmptyState';
-import type { CourierEntry, Customer, DeliveryChallan } from '../types';
+import type { CourierEntry, DeliveryChallan } from '../types';
 import type { PageState } from '../App';
+
+interface CustomerOption {
+  id: string;
+  name: string;
+  phone?: string;
+  address?: string;
+  address2?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+}
 
 const TRANSPORT_OPTIONS = [
   'DTDC', 'BlueDart', 'FedEx', 'Delhivery', 'India Post', 'Ekart', 'XpressBees',
@@ -49,7 +60,7 @@ interface CourierProps {
 export default function Courier({ prefillFromDC }: CourierProps) {
   const { company } = useCompanySettings();
   const [entries, setEntries] = useState<CourierEntry[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [soOptions, setSoOptions] = useState<SOOption[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -154,7 +165,7 @@ export default function Courier({ prefillFromDC }: CourierProps) {
       supabase.from('sales_orders').select('id, so_number, customer_name').in('status', ['confirmed', 'dispatched']).order('created_at', { ascending: false }).limit(50),
     ]);
     setEntries(entriesRes.data || []);
-    setCustomers(customersRes.data || []);
+    setCustomers((customersRes.data || []) as CustomerOption[]);
     setSoOptions(soRes.data || []);
   };
 
@@ -188,6 +199,14 @@ export default function Courier({ prefillFromDC }: CourierProps) {
       customer_state: addr.state,
       customer_pincode: addr.pincode,
       customer_phone: addr.phone,
+      is_b2b: e.is_b2b || false,
+      sender_name: e.sender_name || '',
+      sender_phone: e.sender_phone || '',
+      sender_address: e.sender_address || '',
+      sender_address2: '',
+      sender_city: e.sender_city || '',
+      sender_state: e.sender_state || '',
+      sender_pincode: e.sender_pincode || '',
     });
     setShowModal(true);
   };
@@ -199,8 +218,8 @@ export default function Courier({ prefillFromDC }: CourierProps) {
       customer_id: id,
       customer_name: c?.name || f.customer_name,
       customer_phone: c?.phone || '',
-      customer_address: (c as Customer & { address?: string; address2?: string })?.address || '',
-      customer_address2: (c as Customer & { address?: string; address2?: string })?.address2 || '',
+      customer_address: c?.address || '',
+      customer_address2: c?.address2 || '',
       customer_city: c?.city || '',
       customer_state: c?.state || '',
       customer_pincode: c?.pincode || '',

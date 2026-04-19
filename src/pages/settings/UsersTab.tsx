@@ -3,15 +3,7 @@ import { Plus, Pencil, CheckCircle, Save, Shield, User, Users as UsersIcon } fro
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import type { UserRole } from '../../contexts/AuthContext';
-
-interface UserProfile {
-  id: string;
-  email: string;
-  username: string;
-  display_name: string;
-  role: UserRole;
-  last_sign_in?: string;
-}
+import type { UserProfile } from '../../types';
 
 const ROLES: { value: UserRole; label: string; desc: string; color: string }[] = [
   { value: 'admin',      label: 'Admin',      desc: 'Full access — all settings, purchases, finance', color: 'bg-error-50 text-error-700 border-error-200' },

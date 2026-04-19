@@ -8,7 +8,7 @@ import EmptyState from '../components/ui/EmptyState';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { processStockMovement } from '../services/stockService';
 import { useDateRange } from '../contexts/DateRangeContext';
-import type { PurchaseEntry, Product, Supplier, Godown } from '../types';
+import type { PurchaseEntry, PurchaseEntryItem, Product, Supplier, Godown } from '../types';
 
 type DeliveryStatus = 'Pending' | 'In Transit' | 'Delivered' | 'Delayed' | 'Cancelled';
 
@@ -48,6 +48,17 @@ interface ReceiveItem {
   received_qty: string;
 }
 
+interface EntryItemRow {
+  id?: string;
+  purchase_entry_id: string;
+  product_id?: string | null;
+  product_name: string;
+  unit: string;
+  quantity: number;
+  unit_price: number;
+  total_price: number;
+}
+
 type Tab = 'entries' | 'suppliers';
 
 export default function Purchase() {
@@ -66,7 +77,7 @@ export default function Purchase() {
   const [receiveItems, setReceiveItems] = useState<ReceiveItem[]>([]);
   const [receiveGodownId, setReceiveGodownId] = useState('');
   const [expandedEntry, setExpandedEntry] = useState<string | null>(null);
-  const [entryItems, setEntryItems] = useState<Record<string, any[]>>({});
+  const [entryItems, setEntryItems] = useState<Record<string, EntryItemRow[]>>({});
   const [editingEntry, setEditingEntry] = useState<PurchaseEntry | null>(null);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [confirmEntry, setConfirmEntry] = useState<PurchaseEntry | null>(null);
@@ -96,7 +107,7 @@ export default function Purchase() {
     ]);
     setEntries(entriesRes.data || []);
     setSuppliers(suppliersRes.data || []);
-    setProducts((productsRes.data || []) as any);
+    setProducts((productsRes.data || []) as Product[]);
     setGodowns(godownsRes.data || []);
   };
 
@@ -150,7 +161,7 @@ export default function Purchase() {
       expected_delivery_date: entry.expected_delivery_date || '',
     });
     const { data } = await supabase.from('purchase_entry_items').select('*').eq('purchase_entry_id', entry.id);
-    const loaded = (data || []).map((item: any) => ({
+    const loaded = ((data || []) as PurchaseEntryItem[]).map(item => ({
       product_id: item.product_id || '',
       product_name: item.product_name,
       unit: item.unit,
@@ -179,9 +190,9 @@ export default function Purchase() {
       }
     }
 
-    const loaded = (itemsRes.data || []).map((item: any) => {
-      const orderedQty = parseFloat(item.quantity) || 0;
-      const previouslyReceived = alreadyReceived[item.product_id] || 0;
+    const loaded = ((itemsRes.data || []) as PurchaseEntryItem[]).map(item => {
+      const orderedQty = Number(item.quantity) || 0;
+      const previouslyReceived = item.product_id ? (alreadyReceived[item.product_id] || 0) : 0;
       const remaining = Math.max(0, orderedQty - previouslyReceived);
       return {
         product_id: item.product_id || '',
@@ -199,6 +210,12 @@ export default function Purchase() {
 
   const handleConfirmReceive = async () => {
     if (!receivingEntry || !receiveGodownId) return;
+
+    const hasOverReceive = receiveItems.some(i => (parseFloat(i.received_qty) || 0) > i.ordered_qty);
+    if (hasOverReceive) {
+      alert('Received quantity cannot exceed ordered quantity.');
+      return;
+    }
 
     // receiveItems.received_qty is the DELTA for this batch (remaining qty pre-filled).
     const nowReceived = receiveItems.reduce((s, i) => s + (parseFloat(i.received_qty) || 0), 0);
@@ -226,7 +243,7 @@ export default function Purchase() {
     }
 
     // Accumulate received_qty (not overwrite) and recompute status.
-    const previousTotal = parseFloat(receivingEntry.received_qty as any) || 0;
+    const previousTotal = typeof receivingEntry.received_qty === 'number' ? receivingEntry.received_qty : 0;
     const newTotal = previousTotal + nowReceived;
     const totalOrdered = receiveItems.reduce((s, i) => s + i.ordered_qty, 0);
     const newStatus: DeliveryStatus = newTotal >= totalOrdered ? 'Delivered' : 'In Transit';
@@ -362,7 +379,7 @@ export default function Purchase() {
       state: s.state || '',
       pincode: s.pincode || '',
       gstin: s.gstin || '',
-      notes: (s as any).notes || '',
+      notes: s.notes || '',
       opening_balance: String(s.opening_balance ?? 0),
     });
     setShowSupplierModal(true);
@@ -388,6 +405,11 @@ export default function Purchase() {
   };
 
   const markPaid = async (entry: PurchaseEntry) => {
+    const deliveryState = computeDeliveryStatus(entry);
+    if (deliveryState !== 'Delivered') {
+      alert('Cannot mark as completed before stock is received into godown.');
+      return;
+    }
     await supabase.from('purchase_entries').update({ status: 'paid', paid_amount: entry.total_amount, outstanding_amount: 0 }).eq('id', entry.id);
     if (entry.supplier_id) {
       const { data: sup } = await supabase.from('suppliers').select('balance').eq('id', entry.supplier_id).maybeSingle();
@@ -529,7 +551,7 @@ export default function Purchase() {
                   const ds = computeDeliveryStatus(e);
                   const cachedItems = entryItems[e.id] || [];
                   const productPreview = cachedItems.length > 0
-                    ? cachedItems.slice(0, 3).map((i: any) => i.product_name).join(', ') + (cachedItems.length > 3 ? ` +${cachedItems.length - 3}` : '')
+                    ? cachedItems.slice(0, 3).map(i => i.product_name).join(', ') + (cachedItems.length > 3 ? ` +${cachedItems.length - 3}` : '')
                     : null;
 
                   return (
@@ -646,8 +668,8 @@ export default function Purchase() {
                                 </tr>
                               </thead>
                               <tbody>
-                                {entryItems[e.id].map((item: any) => {
-                                  const recvd = parseFloat(e.received_qty as any) || 0;
+                                {entryItems[e.id].map(item => {
+                                  const recvd = typeof e.received_qty === 'number' ? e.received_qty : 0;
                                   return (
                                     <tr key={item.id} className="text-xs">
                                       <td className="py-0.5 text-neutral-800 font-medium">{item.product_name}</td>

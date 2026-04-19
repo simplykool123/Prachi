@@ -1,17 +1,27 @@
 import { formatCurrency, formatDate, numberToWords } from '../../lib/utils';
 import { useCompanySettings } from '../../lib/useCompanySettings';
-import type { Invoice, Customer } from '../../types';
+import type { Invoice } from '../../types';
 import type { Company } from '../../lib/companiesService';
 
 function joinAddress(parts: (string | undefined | null)[]) {
   return parts.filter(Boolean).join(', ');
 }
 
+interface ShipToCustomer {
+  name: string;
+  phone?: string;
+  address?: string;
+  address2?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+}
+
 interface InvoicePrintProps {
   invoice: Invoice;
   companyOverride?: Company;
   printMode?: 'normal' | 'b2b';
-  shipToCustomer?: Customer;
+  shipToCustomer?: ShipToCustomer;
   b2bShipTo?: { name: string; phone?: string; address?: string };
   b2bPriceMap?: Record<string, number>;
 }
@@ -47,7 +57,7 @@ export default function InvoicePrint({ invoice, companyOverride, printMode = 'no
     invoice.customer_city, invoice.customer_state, invoice.customer_pincode,
   ]);
   const shipToAddress = shipToCustomer
-    ? joinAddress([shipToCustomer.address, (shipToCustomer as Customer & { address2?: string }).address2, shipToCustomer.city, shipToCustomer.state, shipToCustomer.pincode])
+    ? joinAddress([shipToCustomer.address, shipToCustomer.address2, shipToCustomer.city, shipToCustomer.state, shipToCustomer.pincode])
     : '';
 
   const resolvedBuyerName = isB2B ? (b2bShipTo?.name || shipToCustomer?.name || '') : '';

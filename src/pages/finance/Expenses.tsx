@@ -76,9 +76,9 @@ export default function Expenses() {
       payment_mode: e.payment_mode,
       reference_number: e.reference_number || '',
       notes: e.notes || '',
-      receipt_image_url: (e as Record<string, string>).receipt_image_url || '',
-      product_image_url: (e as Record<string, string>).product_image_url || '',
-      payment_screenshot_url: (e as Record<string, string>).payment_screenshot_url || '',
+      receipt_image_url: e.receipt_image_url || '',
+      product_image_url: e.product_image_url || '',
+      payment_screenshot_url: e.payment_screenshot_url || '',
     });
     setShowModal(true);
   };
@@ -137,7 +137,7 @@ export default function Expenses() {
       // Delete attached images from storage first
       const paths: string[] = [];
       for (const key of ['receipt_image_url', 'product_image_url', 'payment_screenshot_url'] as const) {
-        const url = (e as Record<string, string>)[key];
+        const url = e[key];
         if (url) {
           const segment = url.split('/expense-receipts/')[1];
           if (segment) paths.push(segment.split('?')[0]); // strip any query params
@@ -196,8 +196,7 @@ export default function Expenses() {
   };
 
   const hasImages = (e: Expense) => {
-    const ex = e as Record<string, string>;
-    return !!(ex.receipt_image_url || ex.product_image_url || ex.payment_screenshot_url);
+    return !!(e.receipt_image_url || e.product_image_url || e.payment_screenshot_url);
   };
 
   // Image upload tile component
@@ -338,8 +337,7 @@ export default function Expenses() {
             </thead>
             <tbody className="divide-y divide-neutral-50">
               {filtered.map(e => {
-                const ex = e as Record<string, string>;
-                const imgCount = [ex.receipt_image_url, ex.product_image_url, ex.payment_screenshot_url].filter(Boolean).length;
+                const imgCount = [e.receipt_image_url, e.product_image_url, e.payment_screenshot_url].filter(Boolean).length;
                 return (
                   <tr key={e.id} className="hover:bg-neutral-50 transition-colors">
                     <td className="table-cell text-neutral-500">{formatDate(e.expense_date)}</td>
@@ -450,8 +448,9 @@ export default function Expenses() {
           </div>
         }>
         {viewingExpense && (() => {
-          const ex = viewingExpense as Record<string, string>;
-          const images = IMAGE_SLOTS.map(s => ({ label: s.label, url: ex[s.key] })).filter(i => i.url);
+          const images = IMAGE_SLOTS
+            .map(s => ({ label: s.label, url: viewingExpense[s.key] }))
+            .filter((i): i is { label: string; url: string } => Boolean(i.url));
           return (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">

@@ -26,7 +26,7 @@ export interface Product {
 export interface ProductRecommendation {
   id: string;
   customer_id: string;
-  product_id?: string;
+  product_id?: string | null;
   product_name: string;
   direction?: string;
   recommended_quantity: number;
@@ -45,7 +45,7 @@ export interface StockMovement {
   reference_type?: string;
   reference_id?: string;
   reference_number?: string;
-  godown_id?: string;
+  godown_id?: string | null;
   notes?: string;
   created_at: string;
 }
@@ -63,6 +63,7 @@ export interface Supplier {
   state?: string;
   pincode?: string;
   gstin?: string;
+  notes?: string;
   opening_balance: number;
   balance: number;
   is_active: boolean;
@@ -250,6 +251,7 @@ export interface SalesOrderItem {
   unit: string;
   quantity: number;
   unit_price: number;
+  b2b_price?: number;
   discount_pct: number;
   total_price: number;
   godown_id?: string;
@@ -334,9 +336,9 @@ export interface DeliveryChallan {
 }
 
 export interface DeliveryChallanItem {
-  id: string;
-  delivery_challan_id: string;
-  product_id?: string;
+  id?: string;
+  delivery_challan_id?: string;
+  product_id?: string | null;
   product_name: string;
   unit: string;
   quantity: number;
@@ -366,6 +368,7 @@ export interface CourierEntry {
   id: string;
   courier_date: string;
   invoice_id?: string;
+  delivery_challan_id?: string;
   customer_id?: string;
   customer_name: string;
   courier_company: string;
@@ -373,6 +376,13 @@ export interface CourierEntry {
   weight_kg?: number;
   charges: number;
   sales_order_id?: string;
+  is_b2b?: boolean;
+  sender_name?: string;
+  sender_phone?: string;
+  sender_address?: string;
+  sender_city?: string;
+  sender_state?: string;
+  sender_pincode?: string;
   status: 'booked' | 'in_transit' | 'delivered' | 'returned';
   notes?: string;
   created_at: string;
@@ -486,6 +496,32 @@ export interface UserProfile {
   display_name: string;
   email: string;
   created_at: string;
+  last_sign_in?: string;
+}
+
+export interface CompanySettings {
+  id: number;
+  name: string;
+  tagline: string;
+  address1: string;
+  address2: string;
+  city: string;
+  state: string;
+  pincode: string;
+  phone: string;
+  alt_phone: string;
+  email: string;
+  website: string;
+  gstin: string;
+  pan: string;
+  bank_name: string;
+  account_number: string;
+  ifsc_code: string;
+  account_holder: string;
+  upi_id: string;
+  logo_url?: string;
+  footer_note: string;
+  updated_at: string;
 }
 
 export interface Godown {

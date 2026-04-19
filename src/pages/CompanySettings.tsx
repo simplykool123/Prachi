@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Save, Building2, Phone, Mail, MapPin, CreditCard, Globe, CheckCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useCompanySettings, DEFAULT_COMPANY } from '../lib/useCompanySettings';
-import type { CompanySettings } from '../lib/useCompanySettings';
+import type { CompanySettings } from '../types';
 
 export default function CompanySettingsPage() {
   const { company: loaded, loading } = useCompanySettings();

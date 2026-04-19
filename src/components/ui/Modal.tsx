@@ -8,6 +8,7 @@ interface ModalProps {
   subtitle?: string;
   children: React.ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
+  maxWidth?: string;
   footer?: React.ReactNode;
 }
 
@@ -15,7 +16,7 @@ const sizeMap = {
   sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl', '2xl': 'max-w-6xl',
 };
 
-export default function Modal({ isOpen, onClose, title, subtitle, children, size = 'md', footer }: ModalProps) {
+export default function Modal({ isOpen, onClose, title, subtitle, children, size = 'md', maxWidth, footer }: ModalProps) {
   useEffect(() => {
     if (isOpen) document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = ''; };
@@ -35,7 +36,7 @@ export default function Modal({ isOpen, onClose, title, subtitle, children, size
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className={`relative bg-white rounded-xl shadow-card-lg w-full ${sizeMap[size]} max-h-[92vh] flex flex-col`}>
+      <div className={`relative bg-white rounded-xl shadow-card-lg w-full ${maxWidth ?? sizeMap[size]} max-h-[92vh] flex flex-col`}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-100 shrink-0">
           <div>
             <h2 className="text-sm font-semibold text-neutral-900">{title}</h2>

@@ -75,7 +75,7 @@ export default function Reports() {
     );
 
     const prodMap = new Map<string, { revenue: number; qty: number }>();
-    items.forEach((item: any) => {
+    items.forEach((item: { product_name: string; total_price: number; quantity: number }) => {
       const e = prodMap.get(item.product_name) || { revenue: 0, qty: 0 };
       e.revenue += item.total_price; e.qty += item.quantity;
       prodMap.set(item.product_name, e);
@@ -147,8 +147,8 @@ export default function Reports() {
     })).sort((a, b) => b.value - a.value);
     setStockVal(sv);
 
-    const godownValMap: Record<string, { value: number; items: number; name: string }> = {};
-    godownList.forEach(g => { godownValMap[g.id] = { value: 0, items: 0, name: g.name }; });
+    const godownValMap: Record<string, { value: number; items: number; godown: string }> = {};
+    godownList.forEach(g => { godownValMap[g.id] = { value: 0, items: 0, godown: g.name }; });
     rows.forEach(r => {
       const prod = prods.find(p => p.id === r.product_id);
       if (prod && godownValMap[r.godown_id]) {
@@ -170,13 +170,13 @@ export default function Reports() {
     ]);
 
     const buyMap = new Map<string, { qty: number; val: number }>();
-    (purchaseItemsRes.data || []).forEach((i: any) => {
+    (purchaseItemsRes.data || []).forEach((i: { product_name: string; quantity: number; unit_price: number }) => {
       const e = buyMap.get(i.product_name) || { qty: 0, val: 0 };
       e.qty += i.quantity; e.val += i.quantity * i.unit_price;
       buyMap.set(i.product_name, e);
     });
     const sellMap = new Map<string, { qty: number; val: number }>();
-    (saleItemsRes.data || []).forEach((i: any) => {
+    (saleItemsRes.data || []).forEach((i: { product_name: string; quantity: number; total_price: number }) => {
       const e = sellMap.get(i.product_name) || { qty: 0, val: 0 };
       e.qty += i.quantity; e.val += i.total_price;
       sellMap.set(i.product_name, e);
@@ -222,8 +222,8 @@ export default function Reports() {
     const { data } = await supabase.from('suppliers').select('name, balance').gt('balance', 0).eq('is_active', true).order('balance', { ascending: false });
     const { data: entries } = await supabase.from('purchase_entries').select('supplier_name, outstanding_amount').gt('outstanding_amount', 0);
     const countMap: Record<string, number> = {};
-    (entries || []).forEach((e: any) => { countMap[e.supplier_name] = (countMap[e.supplier_name] || 0) + 1; });
-    const sups = (data || []).map((s: any) => ({ name: s.name, balance: s.balance, entry_count: countMap[s.name] || 0 }));
+    (entries || []).forEach((e: { supplier_name: string }) => { countMap[e.supplier_name] = (countMap[e.supplier_name] || 0) + 1; });
+    const sups = (data || []).map((s: { name: string; balance: number }) => ({ name: s.name, balance: s.balance, entry_count: countMap[s.name] || 0 }));
     setPayables(sups);
     setTotalPayable(sups.reduce((s, p) => s + p.balance, 0));
   };

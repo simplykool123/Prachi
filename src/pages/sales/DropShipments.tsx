@@ -9,7 +9,7 @@ import EmptyState from '../../components/ui/EmptyState';
 import ActionMenu, { actionEdit, actionDelete } from '../../components/ui/ActionMenu';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { useDateRange } from '../../contexts/DateRangeContext';
-import type { DropShipment, Product, Supplier, Customer } from '../../types';
+import type { DropShipment, DropShipmentItem, Product, Supplier, Customer } from '../../types';
 
 interface LineItem {
   product_id: string;
@@ -20,7 +20,7 @@ interface LineItem {
   total_price: number;
 }
 
-const DS_STATUS_LABELS: Record<string, string> = {
+const DS_STATUS_LABELS: Record<DropShipment['status'], string> = {
   draft: 'Draft',
   confirmed: 'Confirmed',
   supplier_dispatched: 'Dispatched',
@@ -29,7 +29,7 @@ const DS_STATUS_LABELS: Record<string, string> = {
   cancelled: 'Cancelled',
 };
 
-const DS_STATUS_COLORS: Record<string, string> = {
+const DS_STATUS_COLORS: Record<DropShipment['status'], string> = {
   draft: 'bg-neutral-100 text-neutral-600',
   confirmed: 'bg-blue-100 text-blue-700',
   supplier_dispatched: 'bg-warning-100 text-warning-700',
@@ -50,7 +50,7 @@ export default function DropShipments() {
   const [editingDS, setEditingDS] = useState<DropShipment | null>(null);
   const [confirmDS, setConfirmDS] = useState<DropShipment | null>(null);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
-  const [rowItems, setRowItems] = useState<Record<string, any[]>>({});
+  const [rowItems, setRowItems] = useState<Record<string, DropShipmentItem[]>>({});
 
   const [form, setForm] = useState({
     supplier_id: '',
@@ -82,10 +82,10 @@ export default function DropShipments() {
       supabase.from('customers').select('id, name, phone, address, city, category').eq('is_active', true).eq('category', 'B2B').order('name'),
       supabase.from('products').select('id, name, unit, selling_price').eq('is_active', true),
     ]);
-    setShipments((dsRes.data || []) as any);
-    setSuppliers((supplierRes.data || []) as any);
-    setCustomers((customerRes.data || []) as any);
-    setProducts((productRes.data || []) as any);
+    setShipments((dsRes.data || []) as DropShipment[]);
+    setSuppliers((supplierRes.data || []) as Supplier[]);
+    setCustomers((customerRes.data || []) as Customer[]);
+    setProducts((productRes.data || []) as Product[]);
   };
 
   const subtotal = items.reduce((s, i) => s + i.total_price, 0);
@@ -115,7 +115,7 @@ export default function DropShipments() {
 
   const handleCustomerChange = (id: string) => {
     const c = customers.find(c => c.id === id);
-    setForm(f => ({ ...f, customer_id: id, customer_name: c?.name || '', customer_phone: (c as any)?.phone || '', customer_address: (c as any)?.address || '', customer_city: (c as any)?.city || '' }));
+    setForm(f => ({ ...f, customer_id: id, customer_name: c?.name || '', customer_phone: c?.phone || '', customer_address: c?.address || '', customer_city: c?.city || '' }));
   };
 
   const openNew = () => {
@@ -144,7 +144,7 @@ export default function DropShipments() {
       notes: ds.notes || '',
     });
     const { data } = await supabase.from('drop_shipment_items').select('*').eq('drop_shipment_id', ds.id);
-    const loaded = (data || []).map((item: any) => ({
+    const loaded = ((data || []) as DropShipmentItem[]).map(item => ({
       product_id: item.product_id || '',
       product_name: item.product_name,
       unit: item.unit,
@@ -369,7 +369,7 @@ export default function DropShipments() {
                                 </tr>
                               </thead>
                               <tbody>
-                                {rowItems[ds.id].map((item: any) => (
+                                {rowItems[ds.id].map(item => (
                                   <tr key={item.id} className="text-xs">
                                     <td className="py-0.5 text-neutral-800 font-medium">{item.product_name}</td>
                                     <td className="py-0.5 text-right text-neutral-600">{item.quantity} {item.unit}</td>

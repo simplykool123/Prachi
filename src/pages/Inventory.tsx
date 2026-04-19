@@ -259,46 +259,54 @@ export default function Inventory() {
 
     const isIn = ['purchase', 'return'].includes(mvType);
 
-    if (mvType === 'adjustment') {
-      const { data: row } = await supabase
-        .from('godown_stock')
-        .select('quantity')
-        .eq('product_id', selectedProduct.id)
-        .eq('godown_id', godownId)
-        .maybeSingle();
-      const current = row?.quantity || 0;
-      const delta = qty - current;
-      if (delta !== 0) {
+    try {
+      if (mvType === 'adjustment') {
+        const { data: row } = await supabase
+          .from('godown_stock')
+          .select('quantity')
+          .eq('product_id', selectedProduct.id)
+          .eq('godown_id', godownId)
+          .maybeSingle();
+        const current = row?.quantity || 0;
+        const delta = qty - current;
+        if (delta !== 0) {
+          await processStockMovement({
+            type: 'adjustment',
+            items: [{ product_id: selectedProduct.id, godown_id: godownId, quantity: delta }],
+            reference_type: 'manual_adjustment',
+            notes: stockForm.notes,
+          });
+        }
+      } else {
+        const type = mvType === 'purchase' ? 'purchase' : mvType === 'return' ? 'return' : 'dispatch';
         await processStockMovement({
-          type: 'adjustment',
-          items: [{ product_id: selectedProduct.id, godown_id: godownId, quantity: delta }],
-          reference_type: 'manual_adjustment',
+          type,
+          items: [{ product_id: selectedProduct.id, godown_id: godownId, quantity: qty }],
+          reference_type: 'manual_stock_update',
           notes: stockForm.notes,
         });
       }
-    } else {
-      const type = mvType === 'purchase' ? 'purchase' : mvType === 'return' ? 'return' : 'dispatch';
-      await processStockMovement({
-        type,
-        items: [{ product_id: selectedProduct.id, godown_id: godownId, quantity: qty }],
-        reference_type: 'manual_stock_update',
-        notes: stockForm.notes,
-      });
-    }
 
-    if (selectedProduct.is_gemstone && selectedProduct.total_weight) {
-      const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
-      if (isIn) {
-        updates.remaining_weight = (selectedProduct.remaining_weight || 0) + qty;
-        updates.total_weight = (selectedProduct.total_weight || 0) + (mvType === 'purchase' ? qty : 0);
-      } else if (mvType !== 'adjustment') {
-        updates.remaining_weight = Math.max(0, (selectedProduct.remaining_weight || 0) - qty);
+      if (selectedProduct.is_gemstone && selectedProduct.total_weight) {
+        const updates: { updated_at: string; remaining_weight?: number; total_weight?: number } = { updated_at: new Date().toISOString() };
+        if (isIn) {
+          updates.remaining_weight = (selectedProduct.remaining_weight || 0) + qty;
+          updates.total_weight = (selectedProduct.total_weight || 0) + (mvType === 'purchase' ? qty : 0);
+        } else if (mvType !== 'adjustment') {
+          updates.remaining_weight = Math.max(0, (selectedProduct.remaining_weight || 0) - qty);
+        }
+        await supabase.from('products').update(updates).eq('id', selectedProduct.id);
       }
-      await supabase.from('products').update(updates).eq('id', selectedProduct.id);
+      setShowStockModal(false);
+      loadData();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.toLowerCase().includes('insufficient stock')) {
+        alert('Insufficient Stock');
+      } else {
+        alert(msg || 'Failed to update stock');
+      }
     }
-
-    setShowStockModal(false);
-    loadData();
   };
 
   const handleExport = () => {
@@ -739,7 +747,7 @@ export default function Inventory() {
                 <tbody className="divide-y divide-neutral-50">
                   {stockMovements.map(mv => {
                     const isIn = ['in', 'purchase', 'return'].includes(mv.movement_type);
-                    const typeColors: Record<string, string> = {
+                    const typeColors: Record<StockMovement['movement_type'], string> = {
                       purchase: 'bg-success-50 text-success-700',
                       sale: 'bg-error-50 text-error-700',
                       return: 'bg-blue-50 text-blue-700',

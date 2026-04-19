@@ -11,7 +11,7 @@ import ChallanPrint from './ChallanPrint';
 import { fetchCompanies } from '../../lib/companiesService';
 import type { Company } from '../../lib/companiesService';
 import { createDeliveryChallan, cancelDeliveryChallan } from '../../services/documentFlowService';
-import type { DeliveryChallan as DCType, Product, Customer, SalesOrder, SalesOrderItem } from '../../types';
+import type { DeliveryChallan as DCType, SalesOrder, SalesOrderItem } from '../../types';
 import type { ActivePage } from '../../types';
 import type { PageState } from '../../App';
 
@@ -41,6 +41,25 @@ interface DeliveryChallanProps {
   onNavigate: (page: ActivePage, state?: PageState) => void;
 }
 
+interface ProductOption {
+  id: string;
+  name: string;
+  unit: string;
+  selling_price: number;
+  company_id?: string;
+}
+
+interface CustomerOption {
+  id: string;
+  name: string;
+  phone?: string;
+  address?: string;
+  address2?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+}
+
 const emptyForm = {
   customer_id: '', customer_name: '', customer_phone: '',
   customer_address: '', customer_address2: '',
@@ -56,8 +75,8 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
   const [showModal, setShowModal] = useState(false);
   const [showPrint, setShowPrint] = useState(false);
   const [selectedChallan, setSelectedChallan] = useState<DCType | null>(null);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<ProductOption[]>([]);
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [salesOrders, setSalesOrders] = useState<SalesOrder[]>([]);
   const [editChallan, setEditChallan] = useState<DCType | null>(null);
   const [viewChallan, setViewChallan] = useState<DCType | null>(null);
@@ -94,12 +113,12 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
     ]);
     const allChallans = challansRes.data || [];
     setChallans(allChallans);
-    setProducts(productsRes.data || []);
-    setCustomers(customersRes.data || []);
+    setProducts((productsRes.data || []) as ProductOption[]);
+    setCustomers((customersRes.data || []) as CustomerOption[]);
     setGodowns(godownsRes.data || []);
     const allSOs = (soRes.data || []) as SalesOrder[];
     const soMap: Record<string, { so_number: string; is_b2b: boolean }> = {};
-    allSOs.forEach(so => { soMap[so.id] = { so_number: so.so_number, is_b2b: !!(so as Record<string,unknown>).is_b2b }; });
+    allSOs.forEach(so => { soMap[so.id] = { so_number: so.so_number, is_b2b: !!so.is_b2b }; });
     setSoNumberMap(soMap);
     const linkedSOIds = new Set(allChallans.filter(c => c.sales_order_id && c.status !== 'cancelled').map(c => c.sales_order_id));
     setSalesOrders(allSOs.filter(so => ['confirmed', 'dispatched', 'delivered'].includes(so.status) && !linkedSOIds.has(so.id)));
@@ -157,7 +176,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
         unit_price: String(i.unit_price),
         discount_pct: String(i.discount_pct || 0),
         total_price: i.total_price,
-        godown_id: (i as Record<string,string>).godown_id || godowns[0]?.id || '',
+        godown_id: i.godown_id || godowns[0]?.id || '',
       })));
     }
     setLoadingSO(false);
@@ -601,7 +620,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
               <div>
                 <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">Linked Sales Order</p>
                 <p className="text-sm text-blue-800 font-medium">
-                  {soNumberMap[form.sales_order_id] || [...editingSOs].find(s => s.id === form.sales_order_id)?.so_number || form.sales_order_id}
+                  {String(soNumberMap[form.sales_order_id] || [...editingSOs].find(s => s.id === form.sales_order_id)?.so_number || form.sales_order_id)}
                   {' — '}{form.customer_name}
                 </p>
               </div>

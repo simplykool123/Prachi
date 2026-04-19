@@ -196,7 +196,12 @@ export default function CRM() {
       .select('id, product_id, custom_rate, products(name, unit, selling_price)')
       .eq('customer_id', customerId)
       .eq('is_active', true);
-    setRateCards(data || []);
+    setRateCards((data || []).map((row: { id: string; product_id: string; custom_rate: number; products: { name: string; unit: string; selling_price: number }[] | null }) => ({
+      id: row.id,
+      product_id: row.product_id,
+      custom_rate: row.custom_rate,
+      products: row.products?.[0] || null,
+    })));
   };
 
   const handleSaveRateCard = async () => {
@@ -530,7 +535,7 @@ export default function CRM() {
       'Customer Score': c.customer_score || 0, 'Total Revenue': c.total_revenue || 0,
       'Next Followup': c.next_followup_date || '',
     }));
-    exportToCSV(data as Record<string, unknown>[], 'clients');
+    exportToCSV(data, 'clients');
   };
 
   const filtered = customers.filter(c => {
@@ -1634,7 +1639,7 @@ export default function CRM() {
                 <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search clients..." className="input pl-8 w-56 text-xs" />
               </div>
               <button onClick={handleExportCSV} className="btn-secondary text-xs"><Download className="w-3.5 h-3.5" /> Export</button>
-              <button onClick={() => { setForm({ name: '', phone: '', email: '', address: '', city: '', state: '', category: 'B2C', notes: '', tags: [] }); setShowAddModal(true); }} className="btn-primary">
+              <button onClick={() => { setForm({ name: '', phone: '', alt_phone: '', email: '', address: '', address2: '', city: '', state: '', pincode: '', category: 'B2C', notes: '', tags: [] }); setShowAddModal(true); }} className="btn-primary">
                 <Plus className="w-4 h-4" /> Add Client
               </button>
             </>
