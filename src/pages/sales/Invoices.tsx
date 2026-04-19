@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Search, CreditCard, FileText, Download, Printer, Pencil, Eye, CheckCircle, XCircle, X, ChevronDown, Truck, MoreVertical } from 'lucide-react';
+import { Plus, Search, CreditCard, FileText, Download, Printer, Pencil, Eye, CheckCircle, XCircle, X, Truck } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { formatCurrency, formatDate, formatDateInput, generateId, nextDocNumber, exportToCSV } from '../../lib/utils';
 import Modal from '../../components/ui/Modal';
@@ -65,8 +65,6 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
   const [filterTo, setFilterTo] = useState('');
   const [cancelTarget, setCancelTarget] = useState<Invoice | null>(null);
   const [cancellingInvoiceId, setCancellingInvoiceId] = useState<string | null>(null);
-  const [invDropdownOpen, setInvDropdownOpen] = useState<string | null>(null);
-  const invDropdownRef = useRef<HTMLDivElement>(null);
   const [viewRelated, setViewRelated] = useState<{dispatches: {dispatch_number: string; status: string}[]; payments: {amount: number; payment_date: string; payment_mode: string}[]}>({ dispatches: [], payments: [] });
   const [showSOSelectModal, setShowSOSelectModal] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -115,16 +113,6 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
   const [payForm, setPayForm] = useState({ amount: '', payment_mode: 'Cash', reference_number: '', payment_date: new Date().toISOString().split('T')[0] });
 
   useEffect(() => { loadData(); }, [dateRange]);
-
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (invDropdownRef.current && !invDropdownRef.current.contains(e.target as Node)) {
-        setInvDropdownOpen(null);
-      }
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, []);
 
   useEffect(() => {
     if (!prefillFromDC) return;
@@ -940,61 +928,26 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
                     </td>
                     <td className="py-3 px-3"><StatusBadge status={inv.status} /></td>
                     <td className="table-cell text-right">
-                      <div className="flex items-center justify-end gap-1" ref={invDropdownRef}>
+                      <div className="flex items-center justify-end gap-1">
                         {!isPaid && inv.status !== 'cancelled' && (
                           <button onClick={() => openPayment(inv)} title="Record Payment"
                             className="flex items-center gap-1 px-2 py-1 rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors text-[10px] font-medium">
                             <CreditCard className="w-3 h-3" /> Pay
                           </button>
                         )}
-                        <button onClick={() => openView(inv)} title="View"
-                          className="flex items-center gap-1 px-2 py-1 rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition-colors text-[10px] font-medium">
-                          <Eye className="w-3 h-3" /> View
-                        </button>
-                        <div className="relative">
-                          <button
-                            onClick={() => setInvDropdownOpen(invDropdownOpen === inv.id ? null : inv.id)}
-                            className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-neutral-100 text-neutral-500 transition-colors"
-                          >
-                            <ChevronDown className="w-3.5 h-3.5" />
+                        <button onClick={() => openView(inv)} title="View" className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors"><Eye className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => openPrint(inv, 'normal')} title="Print Invoice" className="p-1.5 rounded-lg text-neutral-400 hover:text-primary-600 hover:bg-primary-50 transition-colors"><Printer className="w-3.5 h-3.5" /></button>
+                        {((inv.delivery_challan_id && dcIsB2bMap[inv.delivery_challan_id as string]) || (inv.sales_order_id && soIsB2bMap[inv.sales_order_id])) && (
+                          <button onClick={() => openPrint(inv, 'b2b')} title="Print B2B Invoice" className="p-1.5 rounded-lg text-neutral-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
+                            <span className="text-[9px] font-bold leading-none">B2B</span>
                           </button>
-                          {invDropdownOpen === inv.id && (
-                            <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-neutral-200 rounded-lg shadow-lg z-10 overflow-hidden">
-                              <button
-                                onClick={() => { setInvDropdownOpen(null); openPrint(inv, 'normal'); }}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-neutral-700 hover:bg-neutral-50 transition-colors"
-                              >
-                                <Printer className="w-3.5 h-3.5" /> Print Invoice
-                              </button>
-                              {((inv.delivery_challan_id && dcIsB2bMap[inv.delivery_challan_id as string]) || (inv.sales_order_id && soIsB2bMap[inv.sales_order_id])) && (
-                                <button
-                                  onClick={() => { setInvDropdownOpen(null); openPrint(inv, 'b2b'); }}
-                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-blue-700 hover:bg-blue-50 transition-colors"
-                                >
-                                  <Printer className="w-3.5 h-3.5" /> Print B2B Invoice
-                                </button>
-                              )}
-                              {inv.status !== 'paid' && inv.status !== 'cancelled' && (
-                                <button
-                                  onClick={() => { setInvDropdownOpen(null); openEdit(inv); }}
-                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-neutral-700 hover:bg-neutral-50 transition-colors"
-                                >
-                                  <Pencil className="w-3.5 h-3.5" /> Edit
-                                </button>
-                              )}
-                              {inv.status !== 'paid' && inv.status !== 'cancelled' && (
-                                <button
-                                  onClick={() => { setInvDropdownOpen(null); setCancelTarget(inv); }}
-                                  disabled={cancellingInvoiceId === inv.id}
-                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-error-600 hover:bg-error-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                  <XCircle className="w-3.5 h-3.5" />
-                                  {cancellingInvoiceId === inv.id ? 'Cancelling...' : 'Cancel'}
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
+                        )}
+                        {inv.status !== 'paid' && inv.status !== 'cancelled' && (
+                          <button onClick={() => openEdit(inv)} title="Edit" className="p-1.5 rounded-lg text-neutral-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
+                        )}
+                        {inv.status !== 'paid' && inv.status !== 'cancelled' && (
+                          <button onClick={() => setCancelTarget(inv)} disabled={cancellingInvoiceId === inv.id} title="Cancel Invoice" className="p-1.5 rounded-lg text-neutral-400 hover:text-error-600 hover:bg-error-50 transition-colors disabled:opacity-50"><XCircle className="w-3.5 h-3.5" /></button>
+                        )}
                       </div>
                     </td>
                   </tr>

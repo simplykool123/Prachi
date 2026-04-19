@@ -29,6 +29,7 @@ export default function Inventory() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [editing, setEditing] = useState<Product | null>(null);
   const [confirmProduct, setConfirmProduct] = useState<Product | null>(null);
+  const [linkedDocs, setLinkedDocs] = useState<{ soCount: number; dcCount: number; invCount: number; soNumbers: string[]; dcNumbers: string[]; invNumbers: string[] } | null>(null);
   const [openRowMenu, setOpenRowMenu] = useState<string | null>(null);
   const [godowns, setGodowns] = useState<Godown[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -232,8 +233,27 @@ export default function Inventory() {
     }
   };
 
+  const initiateDelete = async (p: Product) => {
+    const [soRes, dcRes, invRes] = await Promise.all([
+      supabase.from('sales_order_items').select('sales_order_id, sales_orders!inner(so_number, status)').eq('product_id', p.id).neq('sales_orders.status', 'cancelled'),
+      supabase.from('delivery_challan_items').select('delivery_challan_id, delivery_challans!inner(challan_number, status)').eq('product_id', p.id).neq('delivery_challans.status', 'cancelled'),
+      supabase.from('invoice_items').select('invoice_id, invoices!inner(invoice_number, status)').eq('product_id', p.id).neq('invoices.status', 'cancelled'),
+    ]);
+    const soNumbers = (soRes.data || []).map((r: any) => r.sales_orders?.so_number).filter(Boolean);
+    const dcNumbers = (dcRes.data || []).map((r: any) => r.delivery_challans?.challan_number).filter(Boolean);
+    const invNumbers = (invRes.data || []).map((r: any) => r.invoices?.invoice_number).filter(Boolean);
+    if (soNumbers.length || dcNumbers.length || invNumbers.length) {
+      setLinkedDocs({ soCount: soNumbers.length, dcCount: dcNumbers.length, invCount: invNumbers.length, soNumbers, dcNumbers, invNumbers });
+      setConfirmProduct(p);
+      return;
+    }
+    setLinkedDocs(null);
+    setConfirmProduct(p);
+  };
+
   const handleDelete = async (p: Product) => {
     await supabase.from('products').update({ is_active: false, updated_at: new Date().toISOString() }).eq('id', p.id);
+    setLinkedDocs(null);
     loadData();
   };
 
@@ -463,7 +483,7 @@ export default function Inventory() {
                         <button onClick={() => openLedgerModal(p)} title="Movement Ledger" className="p-1.5 rounded-lg hover:bg-neutral-100 text-neutral-400 hover:text-blue-600 transition-colors">
                           <History className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => setConfirmProduct(p)} title="Delete" className="p-1.5 rounded-lg hover:bg-error-50 text-neutral-400 hover:text-error-600 transition-colors">
+                        <button onClick={() => initiateDelete(p)} title="Delete" className="p-1.5 rounded-lg hover:bg-error-50 text-neutral-400 hover:text-error-600 transition-colors">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
@@ -857,14 +877,55 @@ export default function Inventory() {
       )}
 
       <ConfirmDialog
-        isOpen={!!confirmProduct}
-        onClose={() => setConfirmProduct(null)}
+        isOpen={!!confirmProduct && !linkedDocs}
+        onClose={() => { setConfirmProduct(null); setLinkedDocs(null); }}
         onConfirm={() => confirmProduct && handleDelete(confirmProduct)}
         title="Delete Product"
         message={`Delete "${confirmProduct?.name}"? This product will be removed from the inventory.`}
         confirmLabel="Delete"
         isDanger
       />
+
+      {confirmProduct && linkedDocs && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-error-50 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-error-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-neutral-900">Cannot Delete Product</h3>
+                <p className="text-sm text-neutral-500 mt-1">
+                  <span className="font-medium text-neutral-800">{confirmProduct.name}</span> is linked to active documents. Remove it from all linked documents before deleting.
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2 mb-5">
+              {linkedDocs.soNumbers.length > 0 && (
+                <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                  <p className="text-[10px] font-bold text-blue-500 uppercase tracking-wider mb-1">Sales Orders ({linkedDocs.soNumbers.length})</p>
+                  <p className="text-xs text-blue-800 font-medium">{linkedDocs.soNumbers.join(', ')}</p>
+                </div>
+              )}
+              {linkedDocs.dcNumbers.length > 0 && (
+                <div className="bg-orange-50 border border-orange-100 rounded-lg px-3 py-2">
+                  <p className="text-[10px] font-bold text-orange-500 uppercase tracking-wider mb-1">Delivery Notes ({linkedDocs.dcNumbers.length})</p>
+                  <p className="text-xs text-orange-800 font-medium">{linkedDocs.dcNumbers.join(', ')}</p>
+                </div>
+              )}
+              {linkedDocs.invNumbers.length > 0 && (
+                <div className="bg-green-50 border border-green-100 rounded-lg px-3 py-2">
+                  <p className="text-[10px] font-bold text-green-500 uppercase tracking-wider mb-1">Invoices ({linkedDocs.invNumbers.length})</p>
+                  <p className="text-xs text-green-800 font-medium">{linkedDocs.invNumbers.join(', ')}</p>
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end">
+              <button onClick={() => { setConfirmProduct(null); setLinkedDocs(null); }} className="btn-primary">Got it</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
