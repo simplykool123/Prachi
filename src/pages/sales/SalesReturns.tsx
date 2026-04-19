@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, RotateCcw, ChevronDown, ChevronRight, Download } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { formatCurrency, formatDate, formatDateInput, generateId, exportToCSV } from '../../lib/utils';
+import { formatCurrency, formatDate, formatDateInput, nextDocNumber, exportToCSV } from '../../lib/utils';
 import { useDateRange } from '../../contexts/DateRangeContext';
 import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
@@ -129,8 +129,9 @@ export default function SalesReturns() {
 
   const handleSave = async () => {
     const inv = invoices.find(i => i.id === form.invoice_id);
+    const returnNumber = await nextDocNumber('RET', supabase);
     const { data: ret } = await supabase.from('sales_returns').insert({
-      return_number: generateId('RET'),
+      return_number: returnNumber,
       invoice_id: form.invoice_id || null,
       customer_id: inv?.customer_id || null,
       customer_name: form.customer_name,
@@ -245,17 +246,43 @@ export default function SalesReturns() {
       setRowItems(prev => ({ ...prev, [ret.id]: retItems }));
     }
 
-    const { data: godownList, error: gErr } = await supabase.from('godowns').select('id').eq('is_active', true).order('name').limit(1);
-    if (gErr) throw gErr;
-    const defaultGodownId = godownList && godownList.length > 0 ? godownList[0].id : null;
+    // Build per-product godown map from the original invoice items.
+    // Falls back to the first active godown if the invoice link is missing.
+    const godownByProduct: Record<string, string> = {};
+    if (ret.invoice_id) {
+      const { data: invItems } = await supabase
+        .from('invoice_items').select('product_id, godown_id').eq('invoice_id', ret.invoice_id);
+      for (const ii of (invItems || [])) {
+        if (ii.product_id && ii.godown_id) {
+          godownByProduct[ii.product_id] = ii.godown_id;
+        }
+      }
+    }
+
+    // Fallback godown in case invoice items have no godown_id.
+    let fallbackGodownId: string | null = null;
+    const missingGodown = retItems.some(
+      i => i.return_to_stock && i.product_id && !godownByProduct[i.product_id]
+    );
+    if (missingGodown) {
+      const { data: godownList, error: gErr } = await supabase
+        .from('godowns').select('id').eq('is_active', true).order('name').limit(1);
+      if (gErr) throw gErr;
+      fallbackGodownId = godownList && godownList.length > 0 ? godownList[0].id : null;
+    }
 
     const restockItems = retItems
-      .filter(i => i.return_to_stock && i.product_id && defaultGodownId)
-      .map(i => ({
-        product_id: i.product_id as string,
-        godown_id: defaultGodownId as string,
-        quantity: i.quantity,
-      }));
+      .filter(i => i.return_to_stock && i.product_id)
+      .map(i => {
+        const godownId = godownByProduct[i.product_id as string] || fallbackGodownId;
+        if (!godownId) return null;
+        return {
+          product_id: i.product_id as string,
+          godown_id: godownId,
+          quantity: i.quantity,
+        };
+      })
+      .filter(Boolean) as { product_id: string; godown_id: string; quantity: number }[];
 
     if (restockItems.length > 0) {
       await processStockMovement({

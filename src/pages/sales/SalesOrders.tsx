@@ -8,7 +8,7 @@ import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
 import { useDateRange } from '../../contexts/DateRangeContext';
-import { createSalesOrder, createDeliveryChallan } from '../../services/documentFlowService';
+import { createSalesOrder, createDeliveryChallan, cancelInvoice, cancelDeliveryChallan } from '../../services/documentFlowService';
 import { getSmartRate } from '../../lib/rateCardService';
 import { fetchGodowns, getGodownStockForProduct } from '../../services/godownService';
 import { fetchCompanies } from '../../lib/companiesService';
@@ -543,24 +543,34 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     try {
       const soId = deleteTarget.id;
 
+      // 1. Cancel active invoices first (reverses ledger, re-opens DCs).
       const { data: linkedInvs, error: invLookupErr } = await supabase
-        .from('invoices').select('id').eq('sales_order_id', soId);
+        .from('invoices').select('id, status').eq('sales_order_id', soId);
       if (invLookupErr) throw invLookupErr;
       for (const inv of (linkedInvs || [])) {
-        const { error: invItemsErr } = await supabase.from('invoice_items').delete().eq('invoice_id', inv.id);
-        if (invItemsErr) throw invItemsErr;
-        const { error: invDelErr } = await supabase.from('invoices').delete().eq('id', inv.id);
-        if (invDelErr) throw invDelErr;
+        if (inv.status !== 'cancelled') {
+          await cancelInvoice(inv.id);
+        }
       }
 
+      // 2. Cancel active DCs (reverses stock movements, re-opens SO).
       const { data: linkedDCs, error: dcLookupErr } = await supabase
-        .from('delivery_challans').select('id').eq('sales_order_id', soId);
+        .from('delivery_challans').select('id, status').eq('sales_order_id', soId);
       if (dcLookupErr) throw dcLookupErr;
       for (const dc of (linkedDCs || [])) {
-        const { error: dcItemsErr } = await supabase.from('delivery_challan_items').delete().eq('delivery_challan_id', dc.id);
-        if (dcItemsErr) throw dcItemsErr;
-        const { error: dcDelErr } = await supabase.from('delivery_challans').delete().eq('id', dc.id);
-        if (dcDelErr) throw dcDelErr;
+        if (dc.status !== 'cancelled') {
+          await cancelDeliveryChallan(dc.id);
+        }
+      }
+
+      // 3. Hard-delete documents (cancel RPCs soft-cancelled them; now remove rows).
+      for (const inv of (linkedInvs || [])) {
+        await supabase.from('invoice_items').delete().eq('invoice_id', inv.id);
+        await supabase.from('invoices').delete().eq('id', inv.id);
+      }
+      for (const dc of (linkedDCs || [])) {
+        await supabase.from('delivery_challan_items').delete().eq('delivery_challan_id', dc.id);
+        await supabase.from('delivery_challans').delete().eq('id', dc.id);
       }
 
       const { error: soItemsErr } = await supabase.from('sales_order_items').delete().eq('sales_order_id', soId);

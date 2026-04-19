@@ -155,14 +155,34 @@ export default function Purchase() {
   };
 
   const openReceiveGoods = async (entry: PurchaseEntry) => {
-    const { data } = await supabase.from('purchase_entry_items').select('*').eq('purchase_entry_id', entry.id);
-    const loaded = (data || []).map((item: any) => ({
-      product_id: item.product_id || '',
-      product_name: item.product_name,
-      unit: item.unit,
-      ordered_qty: parseFloat(item.quantity) || 0,
-      received_qty: String(parseFloat(item.quantity) || 0),
-    }));
+    const [itemsRes, movementsRes] = await Promise.all([
+      supabase.from('purchase_entry_items').select('*').eq('purchase_entry_id', entry.id),
+      supabase.from('stock_movements').select('product_id, quantity')
+        .eq('reference_type', 'purchase_entry')
+        .eq('reference_id', entry.id)
+        .eq('movement_type', 'purchase'),
+    ]);
+
+    // Build a map of how much stock has already been posted per product.
+    const alreadyReceived: Record<string, number> = {};
+    for (const mv of (movementsRes.data || [])) {
+      if (mv.product_id) {
+        alreadyReceived[mv.product_id] = (alreadyReceived[mv.product_id] || 0) + (mv.quantity || 0);
+      }
+    }
+
+    const loaded = (itemsRes.data || []).map((item: any) => {
+      const orderedQty = parseFloat(item.quantity) || 0;
+      const previouslyReceived = alreadyReceived[item.product_id] || 0;
+      const remaining = Math.max(0, orderedQty - previouslyReceived);
+      return {
+        product_id: item.product_id || '',
+        product_name: item.product_name,
+        unit: item.unit,
+        ordered_qty: orderedQty,
+        received_qty: String(remaining),
+      };
+    });
     setReceiveItems(loaded.length ? loaded : []);
     setReceivingEntry(entry);
     setReceiveGodownId(godowns[0]?.id || '');
@@ -170,65 +190,44 @@ export default function Purchase() {
   };
 
   const handleConfirmReceive = async () => {
-    if (!receivingEntry) return;
+    if (!receivingEntry || !receiveGodownId) return;
 
+    // receiveItems.received_qty is the DELTA for this batch (remaining qty pre-filled).
+    const nowReceived = receiveItems.reduce((s, i) => s + (parseFloat(i.received_qty) || 0), 0);
+    if (nowReceived <= 0) return;
+
+    // Post stock only for items with positive quantity in this batch.
+    const stockItems = receiveItems
+      .filter(i => i.product_id && (parseFloat(i.received_qty) || 0) > 0)
+      .map(i => ({
+        product_id: i.product_id,
+        godown_id: receiveGodownId,
+        quantity: parseFloat(i.received_qty) || 0,
+        unit_price: products.find(p => p.id === i.product_id)?.purchase_price || 0,
+      }));
+
+    if (stockItems.length > 0) {
+      await processStockMovement({
+        type: 'purchase',
+        items: stockItems,
+        reference_type: 'purchase_entry',
+        reference_id: receivingEntry.id,
+        reference_number: receivingEntry.entry_number,
+        notes: 'Goods received ' + receivingEntry.entry_number,
+      });
+    }
+
+    // Accumulate received_qty (not overwrite) and recompute status.
+    const previousTotal = parseFloat(receivingEntry.received_qty as any) || 0;
+    const newTotal = previousTotal + nowReceived;
     const totalOrdered = receiveItems.reduce((s, i) => s + i.ordered_qty, 0);
-    const totalReceived = receiveItems.reduce((s, i) => s + (parseFloat(i.received_qty) || 0), 0);
-    const newStatus: DeliveryStatus = totalReceived >= totalOrdered ? 'Delivered' : 'In Transit';
-
-    const prevStatus = receivingEntry.delivery_status;
+    const newStatus: DeliveryStatus = newTotal >= totalOrdered ? 'Delivered' : 'In Transit';
 
     await supabase.from('purchase_entries').update({
       delivery_status: newStatus,
-      received_qty: totalReceived,
+      received_qty: newTotal,
       updated_at: new Date().toISOString(),
     }).eq('id', receivingEntry.id);
-
-    if (newStatus === 'Delivered' && prevStatus !== 'Delivered' && receiveGodownId) {
-      const stockItems = receiveItems
-        .filter(i => i.product_id && (parseFloat(i.received_qty) || 0) > 0)
-        .map(i => {
-          const prod = products.find(p => p.id === i.product_id);
-          return {
-            product_id: i.product_id,
-            godown_id: receiveGodownId,
-            quantity: parseFloat(i.received_qty) || 0,
-            unit_price: prod?.purchase_price || 0,
-          };
-        });
-      if (stockItems.length > 0) {
-        await processStockMovement({
-          type: 'purchase',
-          items: stockItems,
-          reference_type: 'purchase_entry',
-          reference_id: receivingEntry.id,
-          reference_number: receivingEntry.entry_number,
-          notes: 'Goods received ' + receivingEntry.entry_number,
-        });
-      }
-    } else if (newStatus === 'In Transit' && receiveGodownId) {
-      const stockItems = receiveItems
-        .filter(i => i.product_id && (parseFloat(i.received_qty) || 0) > 0)
-        .map(i => {
-          const prod = products.find(p => p.id === i.product_id);
-          return {
-            product_id: i.product_id,
-            godown_id: receiveGodownId,
-            quantity: parseFloat(i.received_qty) || 0,
-            unit_price: prod?.purchase_price || 0,
-          };
-        });
-      if (stockItems.length > 0) {
-        await processStockMovement({
-          type: 'purchase',
-          items: stockItems,
-          reference_type: 'purchase_entry',
-          reference_id: receivingEntry.id,
-          reference_number: receivingEntry.entry_number,
-          notes: 'Partial goods received ' + receivingEntry.entry_number,
-        });
-      }
-    }
 
     setShowReceiveModal(false);
     setReceivingEntry(null);
@@ -327,7 +326,11 @@ export default function Purchase() {
   };
 
   const handleDeleteEntry = async (entry: PurchaseEntry) => {
-    await supabase.from('purchase_entries').update({ status: 'cancelled' }).eq('id', entry.id);
+    const { error } = await supabase.rpc('cancel_purchase_entry', { p_entry_id: entry.id });
+    if (error) {
+      alert(error.message);
+      return;
+    }
     loadData();
   };
 
