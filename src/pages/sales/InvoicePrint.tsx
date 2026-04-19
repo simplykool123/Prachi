@@ -54,7 +54,7 @@ export default function InvoicePrint({ invoice, companyOverride, printMode = 'no
   const resolvedBuyerPhone = isB2B ? (b2bShipTo?.phone || shipToCustomer?.phone || '') : '';
   const resolvedBuyerAddress = isB2B ? (b2bShipTo?.address || shipToAddress) : '';
 
-  const b2bItems = isB2B && Object.keys(b2bPriceMap).length > 0
+  const b2bItems = isB2B
     ? (invoice.items || []).map(item => {
         const bp = item.product_id ? b2bPriceMap[item.product_id] : undefined;
         if (bp != null) {
@@ -64,7 +64,7 @@ export default function InvoicePrint({ invoice, companyOverride, printMode = 'no
       })
     : invoice.items;
 
-  const b2bSubtotal = isB2B && b2bItems ? b2bItems.reduce((s, i) => s + i.total_price, 0) : invoice.subtotal;
+  const b2bSubtotal = isB2B ? (b2bItems || []).reduce((s, i) => s + i.total_price, 0) : invoice.subtotal;
   const b2bTotal = isB2B ? b2bSubtotal + (invoice.courier_charges || 0) - (invoice.discount_amount || 0) : invoice.total_amount;
 
   // In B2B mode: seller = invoice customer (Bill To), buyer = ship_to (Ship To)
