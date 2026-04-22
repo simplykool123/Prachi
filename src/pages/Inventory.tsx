@@ -552,15 +552,9 @@ export default function Inventory() {
                         <button onClick={() => openEdit(p)} title="Edit" className="p-1.5 rounded-lg hover:bg-neutral-100 text-neutral-400 hover:text-neutral-700 transition-colors">
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
-                        {p.is_gemstone ? (
-                          <button onClick={() => openStockModal(p)} title="Add / Remove Pieces" className="flex items-center gap-1 px-2 py-1 rounded-lg bg-primary-50 hover:bg-primary-100 text-primary-600 text-[10px] font-semibold transition-colors">
-                            <ArrowUpDown className="w-3 h-3" /> Pieces
-                          </button>
-                        ) : (
-                          <button onClick={() => openStockModal(p)} title="Stock In/Out" className="p-1.5 rounded-lg hover:bg-neutral-100 text-neutral-400 hover:text-primary-600 transition-colors">
-                            <ArrowUpDown className="w-3.5 h-3.5" />
-                          </button>
-                        )}
+                        <button onClick={() => openStockModal(p)} title={p.is_gemstone ? 'Add / Remove Pieces' : 'Stock In/Out'} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-primary-50 hover:bg-primary-100 text-primary-600 text-[10px] font-semibold transition-colors">
+                          <ArrowUpDown className="w-3 h-3" /> {p.is_gemstone ? 'Pieces' : 'Stock'}
+                        </button>
                         <button onClick={() => openLedgerModal(p)} title="Movement Ledger" className="p-1.5 rounded-lg hover:bg-neutral-100 text-neutral-400 hover:text-blue-600 transition-colors">
                           <History className="w-3.5 h-3.5" />
                         </button>
