@@ -68,7 +68,9 @@ export default function InvoicePrint({ invoice, companyOverride, printMode = 'no
     ? (invoice.items || []).map(item => {
         const bp = item.product_id ? b2bPriceMap[item.product_id] : undefined;
         if (bp != null) {
-          return { ...item, unit_price: bp, total_price: item.quantity * bp };
+          const gemW = (item as Record<string, any>).gemstone_weight as number | undefined;
+          const total = gemW != null && gemW > 0 ? gemW * bp : item.quantity * bp;
+          return { ...item, unit_price: bp, total_price: total };
         }
         return item;
       })

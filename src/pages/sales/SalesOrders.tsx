@@ -560,6 +560,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           total_price: i.total_price,
           godown_id: i.godown_id || null,
           product_unit_ids: i.product_unit_ids || [],
+          gemstone_weight: (i.gemstone_weight || 0) > 0 ? i.gemstone_weight : null,
         }))
       );
       if (insertItemsErr) throw insertItemsErr;
@@ -622,6 +623,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
             total_price: i.total_price,
             godown_id: i.godown_id || '',
             product_unit_ids: i.product_unit_ids || [],
+            gemstone_weight: (i as Record<string, any>).gemstone_weight || undefined,
           }))
         : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '', product_unit_ids: [] }]
     );

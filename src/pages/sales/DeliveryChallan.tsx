@@ -24,6 +24,8 @@ interface LineItem {
   discount_pct: string;
   total_price: number;
   godown_id: string;
+  gemstone_weight?: number;
+  product_unit_ids?: string[];
 }
 
 interface ChallanItem {
@@ -168,25 +170,33 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
       .select('*')
       .eq('sales_order_id', soId);
     if (soItems && soItems.length > 0) {
-      setItems(soItems.map((i: SalesOrderItem) => ({
-        product_id: i.product_id || '',
-        product_name: i.product_name,
-        unit: i.unit,
-        quantity: String(i.quantity),
-        unit_price: String(i.unit_price),
-        discount_pct: String(i.discount_pct || 0),
-        total_price: i.total_price,
-        godown_id: i.godown_id || godowns[0]?.id || '',
-      })));
+      setItems(soItems.map((i: SalesOrderItem) => {
+        const gemW = (i as Record<string, any>).gemstone_weight as number | undefined;
+        const unitIds = (i as Record<string, any>).product_unit_ids as string[] | undefined;
+        return {
+          product_id: i.product_id || '',
+          product_name: i.product_name,
+          unit: i.unit,
+          quantity: String(i.quantity),
+          unit_price: String(i.unit_price),
+          discount_pct: String(i.discount_pct || 0),
+          total_price: i.total_price,
+          godown_id: i.godown_id || godowns[0]?.id || '',
+          gemstone_weight: gemW || undefined,
+          product_unit_ids: unitIds || undefined,
+        };
+      }));
     }
     setLoadingSO(false);
   };
 
-  const calcTotal = (qty: string, price: string, disc: string): number => {
-    const q = parseFloat(qty) || 0;
-    const p = parseFloat(price) || 0;
-    const d = parseFloat(disc) || 0;
-    return q * p * (1 - d / 100);
+  const calcTotal = (item: LineItem): number => {
+    const p = parseFloat(item.unit_price) || 0;
+    const d = parseFloat(item.discount_pct) || 0;
+    if ((item.gemstone_weight || 0) > 0) {
+      return (item.gemstone_weight || 0) * p * (1 - d / 100);
+    }
+    return (parseFloat(item.quantity) || 0) * p * (1 - d / 100);
   };
 
   const updateItem = async (i: number, field: string, value: string) => {
@@ -199,9 +209,11 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
           next[i].product_name = p.name;
           next[i].unit = p.unit;
           next[i].unit_price = String(p.selling_price || 0);
+          next[i].gemstone_weight = undefined;
+          next[i].product_unit_ids = undefined;
         }
       }
-      next[i].total_price = calcTotal(next[i].quantity, next[i].unit_price, next[i].discount_pct);
+      next[i].total_price = calcTotal(next[i]);
       return next;
     });
 
@@ -280,6 +292,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
         unit_price: parseFloat(i.unit_price) || 0,
         discount_pct: parseFloat(i.discount_pct) || 0,
         total_price: i.total_price,
+        gemstone_weight: (i.gemstone_weight || 0) > 0 ? i.gemstone_weight : null,
       }))
     );
     setShowModal(false);
@@ -344,7 +357,9 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
             unit_price: String(i.unit_price || 0),
             discount_pct: String(i.discount_pct || 0),
             total_price: i.total_price || 0,
-            godown_id: (i as Record<string,string>).godown_id || '',
+            godown_id: (i as Record<string, any>).godown_id || '',
+            gemstone_weight: (i as Record<string, any>).gemstone_weight || undefined,
+            product_unit_ids: (i as Record<string, any>).product_unit_ids || undefined,
           }))
         : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '' }]
     );
@@ -712,28 +727,43 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((item, i) => (
-                    <tr key={i} className="border-t border-neutral-100">
-                      <td className="px-3 py-2">
-                        <select value={item.product_id} onChange={e => updateItem(i, 'product_id', e.target.value)} className="input text-xs">
-                          <option value="">-- Product --</option>
-                          {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
-                        {!item.product_id && <input value={item.product_name} onChange={e => updateItem(i, 'product_name', e.target.value)} className="input text-xs mt-1" placeholder="Or type name..." />}
-                      </td>
-                      <td className="px-3 py-2 w-28"><select value={item.godown_id} onChange={e => { const gid=e.target.value; setItems(prev=>{const next=[...prev];next[i]={...next[i],godown_id:gid};return next;}); }} className="input text-xs py-1">{godowns.map(g=><option key={g.id} value={g.id}>{g.name}</option>)}</select></td>
-                      <td className="px-3 py-2"><input value={item.unit} onChange={e => updateItem(i, 'unit', e.target.value)} className="input text-xs text-center" /></td>
-                      <td className="px-3 py-2"><input type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} className="input text-xs text-right" /></td>
-                      <td className="px-3 py-2"><input type="number" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', e.target.value)} className="input text-xs text-right" /></td>
-                      <td className="px-3 py-2"><input type="number" value={item.discount_pct} onChange={e => updateItem(i, 'discount_pct', e.target.value)} className="input text-xs text-right" /></td>
-                      <td className="px-3 py-2 text-right text-sm font-medium text-neutral-700">{formatCurrency(item.total_price)}</td>
-                      <td className="px-3 py-2">
-                        <button onClick={() => setItems(prev => prev.filter((_, idx) => idx !== i))} className="text-neutral-400 hover:text-error-500">
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {items.map((item, i) => {
+                    const isGemLine = (item.gemstone_weight || 0) > 0;
+                    return (
+                      <tr key={i} className="border-t border-neutral-100">
+                        <td className="px-3 py-2">
+                          <select value={item.product_id} onChange={e => updateItem(i, 'product_id', e.target.value)} className="input text-xs">
+                            <option value="">-- Product --</option>
+                            {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                          </select>
+                          {!item.product_id && <input value={item.product_name} onChange={e => updateItem(i, 'product_name', e.target.value)} className="input text-xs mt-1" placeholder="Or type name..." />}
+                        </td>
+                        <td className="px-3 py-2 w-28"><select value={item.godown_id} onChange={e => { const gid=e.target.value; setItems(prev=>{const next=[...prev];next[i]={...next[i],godown_id:gid};return next;}); }} className="input text-xs py-1">{godowns.map(g=><option key={g.id} value={g.id}>{g.name}</option>)}</select></td>
+                        <td className="px-3 py-2"><input value={item.unit} onChange={e => updateItem(i, 'unit', e.target.value)} className="input text-xs text-center" /></td>
+                        <td className="px-3 py-2">
+                          {isGemLine ? (
+                            <div className="text-right">
+                              <p className="text-sm font-semibold text-neutral-800">{item.gemstone_weight}g</p>
+                              <p className="text-[10px] text-neutral-400">{item.quantity} pcs</p>
+                            </div>
+                          ) : (
+                            <input type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} className="input text-xs text-right" />
+                          )}
+                        </td>
+                        <td className="px-3 py-2"><input type="number" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', e.target.value)} className="input text-xs text-right" /></td>
+                        <td className="px-3 py-2"><input type="number" value={item.discount_pct} onChange={e => updateItem(i, 'discount_pct', e.target.value)} className="input text-xs text-right" /></td>
+                        <td className="px-3 py-2 text-right text-sm font-medium text-neutral-700">
+                          {formatCurrency(item.total_price)}
+                          {isGemLine && <p className="text-[10px] text-neutral-400 font-normal">{item.gemstone_weight}g &times; {formatCurrency(parseFloat(item.unit_price)||0)}</p>}
+                        </td>
+                        <td className="px-3 py-2">
+                          <button onClick={() => setItems(prev => prev.filter((_, idx) => idx !== i))} className="text-neutral-400 hover:text-error-500">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
