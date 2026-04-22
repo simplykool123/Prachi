@@ -23,6 +23,19 @@ export interface Product {
   updated_at?: string;
 }
 
+export interface ProductUnit {
+  id: string;
+  product_id: string;
+  weight: number;
+  weight_unit: 'kg' | 'g' | 'carat';
+  status: 'in_stock' | 'sold';
+  godown_id?: string | null;
+  created_at?: string;
+  sold_at?: string | null;
+  sold_reference_type?: string | null;
+  sold_reference_id?: string | null;
+}
+
 export interface ProductRecommendation {
   id: string;
   customer_id: string;
@@ -257,6 +270,7 @@ export interface SalesOrderItem {
   discount_pct: number;
   total_price: number;
   godown_id?: string;
+  product_unit_ids?: string[];
 }
 
 export interface Invoice {
