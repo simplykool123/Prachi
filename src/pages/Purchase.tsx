@@ -38,6 +38,10 @@ interface LineItem {
   quantity: string;
   unit_price: string;
   total_price: number;
+  is_gemstone?: boolean;
+  weight_unit?: string;
+  piece_weights?: string;
+  gemstone_weight?: number;
 }
 
 interface ReceiveItem {
@@ -105,7 +109,7 @@ export default function Purchase() {
     const [entriesRes, suppliersRes, productsRes, godownsRes] = await Promise.all([
       supabase.from('purchase_entries').select('*').order('created_at', { ascending: false }),
       supabase.from('suppliers').select('*').eq('is_active', true).order('name'),
-      supabase.from('products').select('id, name, unit, purchase_price').eq('is_active', true),
+      supabase.from('products').select('id, name, unit, purchase_price, is_gemstone, weight_unit').eq('is_active', true),
       supabase.from('godowns').select('*').eq('is_active', true).order('name'),
     ]);
     setEntries(entriesRes.data || []);
@@ -123,17 +127,35 @@ export default function Purchase() {
   const addItem = () => setItems(prev => [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', total_price: 0 }]);
   const removeItem = (i: number) => setItems(prev => prev.filter((_, idx) => idx !== i));
 
+  const parsePieceWeights = (raw: string) =>
+    raw.split('\n').map(w => parseFloat(w.trim())).filter(w => isFinite(w) && w > 0);
+
   const updateItem = (i: number, field: string, value: string) => {
     setItems(prev => {
       const next = [...prev];
       next[i] = { ...next[i], [field]: value };
       if (field === 'product_id') {
         const p = products.find(p => p.id === value);
-        if (p) { next[i].product_name = p.name; next[i].unit = p.unit; next[i].unit_price = String(p.purchase_price); }
+        if (p) {
+          next[i].product_name = p.name;
+          next[i].unit = p.unit;
+          next[i].unit_price = String(p.purchase_price || '');
+          next[i].is_gemstone = p.is_gemstone || false;
+          next[i].weight_unit = p.weight_unit || 'grams';
+          next[i].piece_weights = '';
+          next[i].gemstone_weight = 0;
+          next[i].quantity = p.is_gemstone ? '0' : '1';
+        }
       }
-      const qty = parseFloat(next[i].quantity) || 0;
-      const price = parseFloat(next[i].unit_price) || 0;
-      next[i].total_price = qty * price;
+      if (next[i].is_gemstone) {
+        const weights = parsePieceWeights(next[i].piece_weights || '');
+        const totalWeight = weights.reduce((s, w) => s + w, 0);
+        next[i].gemstone_weight = totalWeight;
+        next[i].quantity = String(weights.length);
+        next[i].total_price = totalWeight * (parseFloat(next[i].unit_price) || 0);
+      } else {
+        next[i].total_price = (parseFloat(next[i].quantity) || 0) * (parseFloat(next[i].unit_price) || 0);
+      }
       return next;
     });
   };
@@ -296,6 +318,15 @@ export default function Purchase() {
   };
 
   const handleSave = async () => {
+    // Validate gemstone lines have piece weights entered
+    for (const item of items.filter(i => i.product_name && i.is_gemstone)) {
+      const weights = parsePieceWeights(item.piece_weights || '');
+      if (weights.length === 0) {
+        alert(`Please enter piece weights for gemstone product: ${item.product_name}`);
+        return;
+      }
+    }
+
     if (editingEntry) {
       await supabase.from('purchase_entries').update({
         supplier_id: form.supplier_id || null,
@@ -348,6 +379,51 @@ export default function Purchase() {
           total_price: i.total_price,
         }));
         await supabase.from('purchase_entry_items').insert(entryItemPayload);
+
+        // Create product_units for gemstone items and receive stock immediately
+        if (form.godown_id) {
+          for (const item of items.filter(i => i.product_id && i.is_gemstone)) {
+            const weights = parsePieceWeights(item.piece_weights || '');
+            if (weights.length > 0) {
+              const prod = products.find(p => p.id === item.product_id);
+              const wUnit: 'g' | 'kg' | 'carat' = prod?.weight_unit === 'carats' ? 'carat' : 'g';
+              const rows = weights.map(weight => ({
+                product_id: item.product_id,
+                weight,
+                weight_unit: wUnit,
+                status: 'in_stock' as const,
+                godown_id: form.godown_id,
+              }));
+              await supabase.from('product_units').insert(rows);
+            }
+          }
+
+          // Post stock for all items (gemstone: piece count; normal: qty)
+          const stockItems = items
+            .filter(i => i.product_id && (parseFloat(i.quantity) || 0) > 0)
+            .map(i => ({
+              product_id: i.product_id,
+              godown_id: form.godown_id,
+              quantity: parseFloat(i.quantity) || 0,
+              unit_price: parseFloat(i.unit_price) || 0,
+            }));
+          if (stockItems.length > 0) {
+            await processStockMovement({
+              type: 'purchase',
+              items: stockItems,
+              reference_type: 'purchase_entry',
+              reference_id: entry.id,
+              reference_number: entryNumber,
+              notes: 'Purchase ' + entryNumber,
+            });
+          }
+
+          const totalQty = items.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0);
+          await supabase.from('purchase_entries').update({
+            delivery_status: 'Delivered',
+            received_qty: totalQty,
+          }).eq('id', entry.id);
+        }
 
         for (const item of items.filter(i => i.product_id)) {
           const prod = products.find(p => p.id === item.product_id);
@@ -841,28 +917,73 @@ export default function Purchase() {
                     <th className="table-header text-left">Product</th>
                     <th className="table-header text-left w-16">Unit</th>
                     <th className="table-header text-right w-20">Qty</th>
-                    <th className="table-header text-right w-24">Price (₹)</th>
-                    <th className="table-header text-right w-24">Total</th>
+                    <th className="table-header text-right w-28">Price (₹)</th>
+                    <th className="table-header text-right w-28">Total</th>
                     <th className="table-header w-8" />
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((item, i) => (
-                    <tr key={i} className="border-t border-neutral-100">
-                      <td className="px-3 py-2">
-                        <select value={item.product_id} onChange={e => updateItem(i, 'product_id', e.target.value)} className="input text-xs">
-                          <option value="">-- Select Product --</option>
-                          {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
-                        {!item.product_id && <input value={item.product_name} onChange={e => updateItem(i, 'product_name', e.target.value)} className="input text-xs mt-1" placeholder="Or type name..." />}
-                      </td>
-                      <td className="px-3 py-2"><input value={item.unit} onChange={e => updateItem(i, 'unit', e.target.value)} className="input text-xs" /></td>
-                      <td className="px-3 py-2"><input type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} className="input text-xs text-right" /></td>
-                      <td className="px-3 py-2"><input type="number" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', e.target.value)} className="input text-xs text-right" /></td>
-                      <td className="px-3 py-2 text-right text-sm font-medium">{formatCurrency(item.total_price)}</td>
-                      <td className="px-3 py-2"><button onClick={() => removeItem(i)} className="text-neutral-400 hover:text-error-500"><X className="w-3.5 h-3.5" /></button></td>
-                    </tr>
-                  ))}
+                  {items.map((item, i) => {
+                    const isGem = !!item.is_gemstone;
+                    const wLabel = item.weight_unit === 'carats' ? 'ct' : 'g';
+                    const weights = isGem ? parsePieceWeights(item.piece_weights || '') : [];
+                    const totalWeight = weights.reduce((s, w) => s + w, 0);
+                    return (
+                      <>
+                        <tr key={i} className="border-t border-neutral-100">
+                          <td className="px-3 py-2">
+                            <select value={item.product_id} onChange={e => updateItem(i, 'product_id', e.target.value)} className="input text-xs">
+                              <option value="">-- Select Product --</option>
+                              {products.map(p => <option key={p.id} value={p.id}>{p.name}{p.is_gemstone ? ' ◆' : ''}</option>)}
+                            </select>
+                            {!item.product_id && <input value={item.product_name} onChange={e => updateItem(i, 'product_name', e.target.value)} className="input text-xs mt-1" placeholder="Or type name..." />}
+                          </td>
+                          <td className="px-3 py-2"><input value={item.unit} onChange={e => updateItem(i, 'unit', e.target.value)} className="input text-xs" /></td>
+                          <td className="px-3 py-2">
+                            {isGem ? (
+                              <div className="text-right">
+                                <p className="text-sm font-semibold text-neutral-800">{weights.length}</p>
+                                <p className="text-[10px] text-neutral-400">pcs</p>
+                              </div>
+                            ) : (
+                              <input type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} className="input text-xs text-right" />
+                            )}
+                          </td>
+                          <td className="px-3 py-2">
+                            <input type="number" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', e.target.value)} className="input text-xs text-right" />
+                            {isGem && <p className="text-[10px] text-neutral-400 text-right mt-0.5">per {wLabel}</p>}
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <p className="text-sm font-semibold">{formatCurrency(item.total_price)}</p>
+                            {isGem && totalWeight > 0 && (
+                              <p className="text-[10px] text-neutral-400 mt-0.5">{totalWeight.toFixed(2)}{wLabel} &times; {formatCurrency(parseFloat(item.unit_price) || 0)}</p>
+                            )}
+                          </td>
+                          <td className="px-3 py-2"><button onClick={() => removeItem(i)} className="text-neutral-400 hover:text-error-500"><X className="w-3.5 h-3.5" /></button></td>
+                        </tr>
+                        {isGem && (
+                          <tr key={`gem-${i}`} className="border-t border-neutral-50 bg-amber-50/50">
+                            <td colSpan={6} className="px-3 py-2">
+                              <label className="text-[10px] font-semibold text-amber-700 uppercase tracking-wider block mb-1">
+                                Piece weights ({item.weight_unit === 'carats' ? 'carats' : 'grams'}) — one per line
+                              </label>
+                              <textarea
+                                value={item.piece_weights || ''}
+                                onChange={e => updateItem(i, 'piece_weights', e.target.value)}
+                                className="input text-xs resize-none h-20 w-full font-mono"
+                                placeholder={'2.3\n4.1\n1.8'}
+                              />
+                              {weights.length > 0 && (
+                                <p className="text-[10px] text-amber-700 mt-1 font-medium">
+                                  {weights.length} piece{weights.length !== 1 ? 's' : ''} &bull; Total weight: {totalWeight.toFixed(2)} {wLabel} &bull; Total: {formatCurrency(item.total_price)}
+                                </p>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
