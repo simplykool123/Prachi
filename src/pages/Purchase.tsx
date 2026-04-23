@@ -8,7 +8,7 @@ import EmptyState from '../components/ui/EmptyState';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { processStockMovement } from '../services/stockService';
 import { useDateRange } from '../contexts/DateRangeContext';
-import type { PurchaseEntry, PurchaseEntryItem, Product, Supplier, Godown } from '../types';
+import type { PurchaseEntry, PurchaseEntryItem, Product, ProductVariant, ProductType, Supplier, Godown } from '../types';
 
 type DeliveryStatus = 'Pending' | 'In Transit' | 'Delivered' | 'Delayed' | 'Cancelled';
 
@@ -39,9 +39,12 @@ interface LineItem {
   unit_price: string;
   total_price: number;
   is_gemstone?: boolean;
+  product_type?: ProductType;
   weight_unit?: string;
   piece_weights?: string;
   gemstone_weight?: number;
+  variant_id?: string;
+  weight_input?: string;
 }
 
 interface ReceiveItem {
@@ -75,6 +78,7 @@ export default function Purchase() {
   const [entries, setEntries] = useState<PurchaseEntry[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [variantsMap, setVariantsMap] = useState<Record<string, ProductVariant[]>>({});
   const [godowns, setGodowns] = useState<Godown[]>([]);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -106,16 +110,23 @@ export default function Purchase() {
   useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
-    const [entriesRes, suppliersRes, productsRes, godownsRes] = await Promise.all([
+    const [entriesRes, suppliersRes, productsRes, godownsRes, variantsRes] = await Promise.all([
       supabase.from('purchase_entries').select('*').order('created_at', { ascending: false }),
       supabase.from('suppliers').select('*').eq('is_active', true).order('name'),
-      supabase.from('products').select('id, name, unit, purchase_price, is_gemstone, weight_unit').eq('is_active', true),
+      supabase.from('products').select('id, name, unit, purchase_price, is_gemstone, weight_unit, product_type').eq('is_active', true),
       supabase.from('godowns').select('*').eq('is_active', true).order('name'),
+      supabase.from('product_variants').select('*').eq('is_active', true).order('name'),
     ]);
     setEntries(entriesRes.data || []);
     setSuppliers(suppliersRes.data || []);
     setProducts((productsRes.data || []) as Product[]);
     setGodowns(godownsRes.data || []);
+    const byVariant: Record<string, ProductVariant[]> = {};
+    for (const v of ((variantsRes.data || []) as ProductVariant[])) {
+      byVariant[v.product_id] = byVariant[v.product_id] || [];
+      byVariant[v.product_id].push(v);
+    }
+    setVariantsMap(byVariant);
   };
 
   const saveDeliveryDate = async (entryId: string, date: string) => {
@@ -130,6 +141,9 @@ export default function Purchase() {
   const parsePieceWeights = (raw: string) =>
     raw.split('\n').map(w => parseFloat(w.trim())).filter(w => isFinite(w) && w > 0);
 
+  const getPType = (p: Product): ProductType =>
+    (p.product_type as ProductType) || (p.is_gemstone ? 'gemstone' : 'simple');
+
   const updateItem = (i: number, field: string, value: string) => {
     setItems(prev => {
       const next = [...prev];
@@ -137,22 +151,35 @@ export default function Purchase() {
       if (field === 'product_id') {
         const p = products.find(p => p.id === value);
         if (p) {
+          const pType = getPType(p);
           next[i].product_name = p.name;
           next[i].unit = p.unit;
           next[i].unit_price = String(p.purchase_price || '');
-          next[i].is_gemstone = p.is_gemstone || false;
+          next[i].is_gemstone = pType === 'gemstone';
+          next[i].product_type = pType;
           next[i].weight_unit = p.weight_unit || 'grams';
           next[i].piece_weights = '';
           next[i].gemstone_weight = 0;
-          next[i].quantity = p.is_gemstone ? '0' : '1';
+          next[i].variant_id = undefined;
+          next[i].weight_input = '';
+          next[i].quantity = (pType === 'gemstone' || pType === 'weight') ? '0' : '1';
         }
       }
-      if (next[i].is_gemstone) {
+      if (field === 'variant_id') {
+        const variant = (variantsMap[next[i].product_id] || []).find(v => v.id === value);
+        if (variant) next[i].unit_price = String(variant.purchase_price || next[i].unit_price);
+      }
+      const pType = next[i].product_type || (next[i].is_gemstone ? 'gemstone' : 'simple');
+      if (pType === 'gemstone') {
         const weights = parsePieceWeights(next[i].piece_weights || '');
         const totalWeight = weights.reduce((s, w) => s + w, 0);
         next[i].gemstone_weight = totalWeight;
         next[i].quantity = String(weights.length);
         next[i].total_price = totalWeight * (parseFloat(next[i].unit_price) || 0);
+      } else if (pType === 'weight') {
+        const w = parseFloat(next[i].weight_input || '0') || 0;
+        next[i].quantity = String(w);
+        next[i].total_price = w * (parseFloat(next[i].unit_price) || 0);
       } else {
         next[i].total_price = (parseFloat(next[i].quantity) || 0) * (parseFloat(next[i].unit_price) || 0);
       }
@@ -924,26 +951,49 @@ export default function Purchase() {
                 </thead>
                 <tbody>
                   {items.map((item, i) => {
-                    const isGem = !!item.is_gemstone;
+                    const pType = item.product_type || (item.is_gemstone ? 'gemstone' : 'simple');
                     const wLabel = item.weight_unit === 'carats' ? 'ct' : 'g';
-                    const weights = isGem ? parsePieceWeights(item.piece_weights || '') : [];
+                    const weights = pType === 'gemstone' ? parsePieceWeights(item.piece_weights || '') : [];
                     const totalWeight = weights.reduce((s, w) => s + w, 0);
+                    const productVariants = item.product_id ? (variantsMap[item.product_id] || []) : [];
                     return (
                       <>
                         <tr key={i} className="border-t border-neutral-100">
                           <td className="px-3 py-2">
                             <select value={item.product_id} onChange={e => updateItem(i, 'product_id', e.target.value)} className="input text-xs">
                               <option value="">-- Select Product --</option>
-                              {products.map(p => <option key={p.id} value={p.id}>{p.name}{p.is_gemstone ? ' ◆' : ''}</option>)}
+                              {products.map(p => {
+                                const pt = getPType(p);
+                                const suffix = pt === 'gemstone' ? ' ◆' : pt === 'variant' ? ' ▼' : pt === 'weight' ? ' ⚖' : '';
+                                return <option key={p.id} value={p.id}>{p.name}{suffix}</option>;
+                              })}
                             </select>
                             {!item.product_id && <input value={item.product_name} onChange={e => updateItem(i, 'product_name', e.target.value)} className="input text-xs mt-1" placeholder="Or type name..." />}
+                            {pType === 'variant' && productVariants.length > 0 && (
+                              <select value={item.variant_id || ''} onChange={e => updateItem(i, 'variant_id', e.target.value)} className="input text-xs mt-1">
+                                <option value="">-- Select Variant --</option>
+                                {productVariants.map(v => <option key={v.id} value={v.id}>{v.name}{v.sku ? ` (${v.sku})` : ''}</option>)}
+                              </select>
+                            )}
                           </td>
                           <td className="px-3 py-2"><input value={item.unit} onChange={e => updateItem(i, 'unit', e.target.value)} className="input text-xs" /></td>
                           <td className="px-3 py-2">
-                            {isGem ? (
+                            {pType === 'gemstone' ? (
                               <div className="text-right">
                                 <p className="text-sm font-semibold text-neutral-800">{weights.length}</p>
                                 <p className="text-[10px] text-neutral-400">pcs</p>
+                              </div>
+                            ) : pType === 'weight' ? (
+                              <div>
+                                <input
+                                  type="number"
+                                  value={item.weight_input || ''}
+                                  onChange={e => updateItem(i, 'weight_input', e.target.value)}
+                                  className="input text-xs text-right"
+                                  placeholder="0.00"
+                                  step="0.001"
+                                />
+                                <p className="text-[10px] text-neutral-400 text-right mt-0.5">{wLabel}</p>
                               </div>
                             ) : (
                               <input type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} className="input text-xs text-right" />
@@ -951,17 +1001,22 @@ export default function Purchase() {
                           </td>
                           <td className="px-3 py-2">
                             <input type="number" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', e.target.value)} className="input text-xs text-right" />
-                            {isGem && <p className="text-[10px] text-neutral-400 text-right mt-0.5">per {wLabel}</p>}
+                            {(pType === 'gemstone' || pType === 'weight') && (
+                              <p className="text-[10px] text-neutral-400 text-right mt-0.5">per {wLabel}</p>
+                            )}
                           </td>
                           <td className="px-3 py-2 text-right">
                             <p className="text-sm font-semibold">{formatCurrency(item.total_price)}</p>
-                            {isGem && totalWeight > 0 && (
+                            {pType === 'gemstone' && totalWeight > 0 && (
                               <p className="text-[10px] text-neutral-400 mt-0.5">{totalWeight.toFixed(2)}{wLabel} &times; {formatCurrency(parseFloat(item.unit_price) || 0)}</p>
+                            )}
+                            {pType === 'weight' && (parseFloat(item.weight_input || '0') || 0) > 0 && (
+                              <p className="text-[10px] text-neutral-400 mt-0.5">{parseFloat(item.weight_input || '0').toFixed(3)}{wLabel} &times; {formatCurrency(parseFloat(item.unit_price) || 0)}</p>
                             )}
                           </td>
                           <td className="px-3 py-2"><button onClick={() => removeItem(i)} className="text-neutral-400 hover:text-error-500"><X className="w-3.5 h-3.5" /></button></td>
                         </tr>
-                        {isGem && (
+                        {pType === 'gemstone' && (
                           <tr key={`gem-${i}`} className="border-t border-neutral-50 bg-amber-50/50">
                             <td colSpan={6} className="px-3 py-2">
                               <label className="text-[10px] font-semibold text-amber-700 uppercase tracking-wider block mb-1">

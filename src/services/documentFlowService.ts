@@ -9,6 +9,7 @@ export interface SalesOrderItemInput {
   discount_pct?: number;
   godown_id?: string | null;
   gemstone_weight?: number | null;
+  variant_id?: string | null;
 }
 
 export interface CreateSalesOrderPayload {

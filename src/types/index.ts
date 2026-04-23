@@ -1,9 +1,12 @@
+export type ProductType = 'simple' | 'variant' | 'weight' | 'gemstone';
+
 export interface Product {
   company_id?: string;
   company_name?: string; // joined when needed
   id: string;
   sku?: string;
   name: string;
+  product_type?: ProductType;
   category?: 'Astro Products' | 'Vastu Items' | 'Healing Items';
   unit: string;
   purchase_price?: number;
@@ -19,6 +22,19 @@ export interface Product {
   remaining_weight?: number;
   weight_unit?: 'grams' | 'carats';
   is_active?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ProductVariant {
+  id: string;
+  product_id: string;
+  name: string;
+  sku: string;
+  stock_quantity: number;
+  purchase_price: number;
+  selling_price: number;
+  is_active: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -271,6 +287,8 @@ export interface SalesOrderItem {
   total_price: number;
   godown_id?: string;
   product_unit_ids?: string[];
+  variant_id?: string;
+  gemstone_weight?: number;
 }
 
 export interface Invoice {

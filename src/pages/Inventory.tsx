@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, ArrowUpDown, Search, BarChart2, AlertTriangle, ImagePlus, Download, History, Pencil, Trash2, Eye, X, MoreVertical } from 'lucide-react';
+import { Plus, ArrowUpDown, Search, BarChart2, AlertTriangle, ImagePlus, Download, History, Pencil, Trash2, Eye, X, MoreVertical, Layers, ChevronDown, ChevronRight } from 'lucide-react';
 import { supabase, uploadProductImage } from '../lib/supabase';
 import { formatCurrency, generateId, exportToCSV, formatDate } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/ui/Modal';
 import EmptyState from '../components/ui/EmptyState';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import type { Product, ProductUnit, StockMovement, Godown } from '../types';
+import type { Product, ProductUnit, ProductVariant, ProductType, StockMovement, Godown } from '../types';
 import { fetchCompanies } from '../lib/companiesService';
 import type { Company } from '../lib/companiesService';
 import { processStockMovement } from '../services/stockService';
@@ -41,8 +41,13 @@ export default function Inventory() {
   const [stockMovements, setStockMovements] = useState<StockMovement[]>([]);
   const [productUnitsMap, setProductUnitsMap] = useState<Record<string, ProductUnit[]>>({});
 
+  const [variantsMap, setVariantsMap] = useState<Record<string, ProductVariant[]>>({});
+  const [expandedVariantProduct, setExpandedVariantProduct] = useState<string | null>(null);
+  const [editingVariants, setEditingVariants] = useState<ProductVariant[]>([]);
+
   const [form, setForm] = useState({
     name: '', category: 'Astro Products' as Product['category'], unit: 'pcs',
+    product_type: 'simple' as ProductType,
     purchase_price: '', selling_price: '', low_stock_alert: '5',
     description: '', sku: '', image_url: '',
     direction: '', is_gemstone: false, weight_grams: '',
@@ -74,11 +79,12 @@ export default function Inventory() {
 
   const loadData = async () => {
     setLoading(true);
-    const [productsRes, godownsRes, godownStockRes, unitsRes] = await Promise.all([
+    const [productsRes, godownsRes, godownStockRes, unitsRes, variantsRes] = await Promise.all([
       supabase.from('products').select('*').eq('is_active', true).order('created_at', { ascending: false }),
       supabase.from('godowns').select('*').eq('is_active', true).order('name'),
       supabase.from('godown_stock').select('product_id, quantity'),
       supabase.from('product_units').select('*').order('created_at', { ascending: false }),
+      supabase.from('product_variants').select('*').eq('is_active', true).order('name'),
     ]);
     const rawProducts = productsRes.data || [];
     const stockRows = godownStockRes.data || [];
@@ -91,15 +97,25 @@ export default function Inventory() {
       byProduct[unit.product_id] = byProduct[unit.product_id] || [];
       byProduct[unit.product_id].push(unit);
     }
+    const byVariant: Record<string, ProductVariant[]> = {};
+    for (const v of ((variantsRes.data || []) as ProductVariant[])) {
+      byVariant[v.product_id] = byVariant[v.product_id] || [];
+      byVariant[v.product_id].push(v);
+    }
     const merged = rawProducts.map(p => {
-      if (p.is_gemstone) {
+      if (p.is_gemstone || p.product_type === 'gemstone') {
         const inStockCount = (byProduct[p.id] || []).filter(u => u.status === 'in_stock').length;
         return { ...p, stock_quantity: inStockCount };
+      }
+      if (p.product_type === 'variant') {
+        const variantTotal = (byVariant[p.id] || []).reduce((s, v) => s + (v.stock_quantity || 0), 0);
+        return { ...p, stock_quantity: variantTotal };
       }
       return { ...p, stock_quantity: stockTotals[p.id] ?? p.stock_quantity };
     });
     setProducts(merged);
     setProductUnitsMap(byProduct);
+    setVariantsMap(byVariant);
     setGodowns(godownsRes.data || []);
     setLoading(false);
   };
@@ -112,8 +128,10 @@ export default function Inventory() {
     (godowns).forEach(g => { stocks[g.id] = '0'; });
     setOpeningStocks(stocks);
     const defaultCompany = companies.find(c => c.sort_order === 2) || companies[0];
+    setEditingVariants([]);
     setForm({
       name: '', category: 'Astro Products', unit: 'pcs',
+      product_type: 'simple',
       purchase_price: '', selling_price: '', low_stock_alert: '5',
       description: '', sku: generateId('SKU'), image_url: '',
       direction: '', is_gemstone: false, weight_grams: '',
@@ -136,8 +154,16 @@ export default function Inventory() {
     (stocks || []).forEach(s => { stocksMap[s.godown_id] = String(s.quantity); });
     godowns.forEach(g => { if (!stocksMap[g.id]) stocksMap[g.id] = '0'; });
     setEditGodownStocks(stocksMap);
+    const pType: ProductType = (p.product_type as ProductType) || (p.is_gemstone ? 'gemstone' : 'simple');
+    if (pType === 'variant') {
+      const { data: vRows } = await supabase.from('product_variants').select('*').eq('product_id', p.id).eq('is_active', true).order('name');
+      setEditingVariants((vRows || []) as ProductVariant[]);
+    } else {
+      setEditingVariants([]);
+    }
     setForm({
       name: p.name, category: p.category, unit: p.unit,
+      product_type: pType,
       purchase_price: String(p.purchase_price), selling_price: String(p.selling_price),
       low_stock_alert: String(p.low_stock_alert),
       description: p.description || '', sku: p.sku, image_url: p.image_url || '',
@@ -167,19 +193,21 @@ export default function Inventory() {
       if (uploaded) imageUrl = uploaded;
       setImageUploading(false);
     }
-    const totalW = form.is_gemstone && form.total_weight ? parseFloat(form.total_weight) || 0 : 0;
+    const isGemstone = form.product_type === 'gemstone';
+    const totalW = isGemstone && form.total_weight ? parseFloat(form.total_weight) || 0 : 0;
     const basePayload = {
       name: form.name, category: form.category, unit: form.unit, sku: form.sku,
+      product_type: form.product_type,
       purchase_price: parseFloat(form.purchase_price) || 0,
       selling_price: parseFloat(form.selling_price) || 0,
       low_stock_alert: form.low_stock_enabled ? (parseFloat(form.low_stock_alert) || 5) : 0,
       description: form.description,
       image_url: imageUrl || null,
       direction: form.direction || null,
-      is_gemstone: form.is_gemstone,
-      weight_grams: form.is_gemstone && form.weight_grams ? parseFloat(form.weight_grams) || null : null,
+      is_gemstone: isGemstone,
+      weight_grams: isGemstone && form.weight_grams ? parseFloat(form.weight_grams) || null : null,
       total_weight: totalW,
-      weight_unit: form.is_gemstone ? form.weight_unit : null,
+      weight_unit: (isGemstone || form.product_type === 'weight') ? form.weight_unit : null,
       company_id: form.company_id || null,
       updated_at: new Date().toISOString(),
     };
@@ -188,51 +216,72 @@ export default function Inventory() {
         const { error: productErr } = await supabase.from('products').update(basePayload).eq('id', editing.id);
         if (productErr) throw productErr;
 
-        const { data: currentStocks, error: currentErr } = await supabase
-          .from('godown_stock')
-          .select('godown_id, quantity')
-          .eq('product_id', editing.id);
-        if (currentErr) throw currentErr;
-        const currentMap: Record<string, number> = {};
-        (currentStocks || []).forEach(s => { currentMap[s.godown_id] = s.quantity || 0; });
+        // Save variants (upsert by id)
+        if (form.product_type === 'variant') {
+          for (const v of editingVariants) {
+            if (v.id && !v.id.startsWith('new-')) {
+              await supabase.from('product_variants').update({
+                name: v.name, sku: v.sku,
+                purchase_price: v.purchase_price, selling_price: v.selling_price,
+                stock_quantity: v.stock_quantity, updated_at: new Date().toISOString(),
+              }).eq('id', v.id);
+            } else {
+              await supabase.from('product_variants').insert({
+                product_id: editing.id, name: v.name, sku: v.sku || generateId('VAR'),
+                purchase_price: v.purchase_price, selling_price: v.selling_price,
+                stock_quantity: v.stock_quantity,
+              });
+            }
+          }
+        }
 
-        const adjustItems = Object.entries(editGodownStocks)
-          .map(([godown_id, qtyStr]) => {
-            const target = parseFloat(qtyStr) || 0;
-            const current = currentMap[godown_id] || 0;
-            return { product_id: editing.id, godown_id, quantity: target - current };
-          })
-          .filter(i => i.quantity !== 0);
-
-        if (adjustItems.length > 0) {
-          await processStockMovement({
-            type: 'adjustment',
-            items: adjustItems,
-            reference_type: 'stock_edit',
-            reference_id: editing.id,
-            notes: 'Manual stock edit',
-          });
+        if (form.product_type !== 'variant') {
+          const { data: currentStocks, error: currentErr } = await supabase
+            .from('godown_stock').select('godown_id, quantity').eq('product_id', editing.id);
+          if (currentErr) throw currentErr;
+          const currentMap: Record<string, number> = {};
+          (currentStocks || []).forEach(s => { currentMap[s.godown_id] = s.quantity || 0; });
+          const adjustItems = Object.entries(editGodownStocks)
+            .map(([godown_id, qtyStr]) => {
+              const target = parseFloat(qtyStr) || 0;
+              const current = currentMap[godown_id] || 0;
+              return { product_id: editing.id, godown_id, quantity: target - current };
+            })
+            .filter(i => i.quantity !== 0);
+          if (adjustItems.length > 0) {
+            await processStockMovement({
+              type: 'adjustment', items: adjustItems,
+              reference_type: 'stock_edit', reference_id: editing.id, notes: 'Manual stock edit',
+            });
+          }
         }
       } else {
         const createPayload = { ...basePayload, remaining_weight: totalW };
         const { data: newProduct, error: insertErr } = await supabase.from('products').insert(createPayload).select().maybeSingle();
         if (insertErr) throw insertErr;
         if (newProduct) {
-          const openingItems = Object.entries(openingStocks)
-            .map(([godown_id, qtyStr]) => ({
-              product_id: newProduct.id,
-              godown_id,
-              quantity: parseFloat(qtyStr) || 0,
-            }))
-            .filter(i => i.quantity > 0);
-          if (openingItems.length > 0) {
-            await processStockMovement({
-              type: 'adjustment',
-              items: openingItems,
-              reference_type: 'opening_stock',
-              reference_id: newProduct.id,
-              notes: 'Opening stock',
-            });
+          // Save new variants
+          if (form.product_type === 'variant' && editingVariants.length > 0) {
+            await supabase.from('product_variants').insert(
+              editingVariants.map(v => ({
+                product_id: newProduct.id, name: v.name, sku: v.sku || generateId('VAR'),
+                purchase_price: v.purchase_price, selling_price: v.selling_price,
+                stock_quantity: v.stock_quantity,
+              }))
+            );
+          }
+          if (form.product_type !== 'variant') {
+            const openingItems = Object.entries(openingStocks)
+              .map(([godown_id, qtyStr]) => ({
+                product_id: newProduct.id, godown_id, quantity: parseFloat(qtyStr) || 0,
+              }))
+              .filter(i => i.quantity > 0);
+            if (openingItems.length > 0) {
+              await processStockMovement({
+                type: 'adjustment', items: openingItems,
+                reference_type: 'opening_stock', reference_id: newProduct.id, notes: 'Opening stock',
+              });
+            }
           }
         }
       }
@@ -509,10 +558,27 @@ export default function Inventory() {
             <tbody>
               {filtered.map(p => {
                 const bar = getStockBar(p);
+                const pType: ProductType = (p.product_type as ProductType) || (p.is_gemstone ? 'gemstone' : 'simple');
+                const isVariant = pType === 'variant';
+                const isExpanded = expandedVariantProduct === p.id;
+                const pVariants = variantsMap[p.id] || [];
+                const typeColors: Record<ProductType, string> = {
+                  simple: 'bg-neutral-100 text-neutral-500',
+                  variant: 'bg-blue-100 text-blue-700',
+                  weight: 'bg-amber-100 text-amber-700',
+                  gemstone: 'bg-primary-100 text-primary-700',
+                };
                 return (
+                  <>
                   <tr key={p.id} className="border-b border-neutral-100 hover:bg-neutral-50 transition-colors cursor-pointer" onClick={() => setViewProduct(p)}>
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-2.5">
+                        {isVariant && (
+                          <button onClick={e => { e.stopPropagation(); setExpandedVariantProduct(isExpanded ? null : p.id); }}
+                            className="p-0.5 text-neutral-400 hover:text-primary-600 transition-colors">
+                            {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                          </button>
+                        )}
                         {p.image_url ? (
                           <img src={p.image_url} alt={p.name} className="w-8 h-8 rounded-lg object-cover flex-shrink-0 border border-neutral-100" />
                         ) : (
@@ -521,7 +587,10 @@ export default function Inventory() {
                           </div>
                         )}
                         <div>
-                          <p className="font-semibold text-neutral-900 text-sm leading-tight">{p.name}</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="font-semibold text-neutral-900 text-sm leading-tight">{p.name}</p>
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider ${typeColors[pType]}`}>{pType}</span>
+                          </div>
                           <p className="text-[10px] text-neutral-400">{p.sku}</p>
                         </div>
                       </div>
@@ -539,12 +608,18 @@ export default function Inventory() {
                     </td>
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-2">
-                        <div className="w-16 h-1.5 bg-neutral-100 rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full ${bar.color}`} style={{ width: `${bar.pct}%` }} />
-                        </div>
-                        <span className={`text-xs font-medium ${p.stock_quantity <= 0 ? 'text-error-600' : p.stock_quantity <= p.low_stock_alert ? 'text-warning-600' : 'text-neutral-700'}`}>
-                          {p.stock_quantity}
-                        </span>
+                        {isVariant ? (
+                          <span className="text-xs text-neutral-500">{pVariants.length} variants</span>
+                        ) : (
+                          <>
+                            <div className="w-16 h-1.5 bg-neutral-100 rounded-full overflow-hidden">
+                              <div className={`h-full rounded-full ${bar.color}`} style={{ width: `${bar.pct}%` }} />
+                            </div>
+                            <span className={`text-xs font-medium ${p.stock_quantity <= 0 ? 'text-error-600' : p.stock_quantity <= p.low_stock_alert ? 'text-warning-600' : 'text-neutral-700'}`}>
+                              {p.stock_quantity}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </td>
                     <td className="table-cell text-right" onClick={e => e.stopPropagation()}>
@@ -552,9 +627,11 @@ export default function Inventory() {
                         <button onClick={() => openEdit(p)} title="Edit" className="p-1.5 rounded-lg hover:bg-neutral-100 text-neutral-400 hover:text-neutral-700 transition-colors">
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => openStockModal(p)} title={p.is_gemstone ? 'Add / Remove Pieces' : 'Stock In/Out'} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-primary-50 hover:bg-primary-100 text-primary-600 text-[10px] font-semibold transition-colors">
-                          <ArrowUpDown className="w-3 h-3" /> {p.is_gemstone ? 'Pieces' : 'Stock'}
-                        </button>
+                        {pType !== 'variant' && (
+                          <button onClick={() => openStockModal(p)} title={p.is_gemstone ? 'Add / Remove Pieces' : 'Stock In/Out'} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-primary-50 hover:bg-primary-100 text-primary-600 text-[10px] font-semibold transition-colors">
+                            <ArrowUpDown className="w-3 h-3" /> {p.is_gemstone ? 'Pieces' : 'Stock'}
+                          </button>
+                        )}
                         <button onClick={() => openLedgerModal(p)} title="Movement Ledger" className="p-1.5 rounded-lg hover:bg-neutral-100 text-neutral-400 hover:text-blue-600 transition-colors">
                           <History className="w-3.5 h-3.5" />
                         </button>
@@ -564,6 +641,28 @@ export default function Inventory() {
                       </div>
                     </td>
                   </tr>
+                  {isVariant && isExpanded && pVariants.map(v => (
+                    <tr key={v.id} className="bg-blue-50/50 border-b border-blue-100">
+                      <td className="py-2 pl-16 pr-3">
+                        <div className="flex items-center gap-1.5">
+                          <Layers className="w-3 h-3 text-blue-400" />
+                          <p className="text-xs font-medium text-neutral-700">{v.name}</p>
+                          <p className="text-[10px] text-neutral-400">{v.sku}</p>
+                        </div>
+                      </td>
+                      <td className="py-2 px-3" />
+                      <td className="py-2 px-3 text-xs text-neutral-500">{p.unit}</td>
+                      <td className="py-2 px-3">
+                        {isAdmin && <p className="text-[10px] text-neutral-400">P: {formatCurrency(v.purchase_price)}</p>}
+                        <p className="text-xs font-semibold text-primary-700">S: {formatCurrency(v.selling_price)}</p>
+                      </td>
+                      <td className="py-2 px-3">
+                        <span className={`text-xs font-medium ${v.stock_quantity <= 0 ? 'text-error-600' : 'text-neutral-700'}`}>{v.stock_quantity}</span>
+                      </td>
+                      <td className="py-2 px-3" />
+                    </tr>
+                  ))}
+                  </>
                 );
               })}
             </tbody>
@@ -656,17 +755,28 @@ export default function Inventory() {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 items-end">
-            <div className="flex items-center gap-2 pb-1">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <div onClick={() => setForm(f => ({ ...f, is_gemstone: !f.is_gemstone }))}
-                  className={`w-8 h-4 rounded-full transition-colors cursor-pointer ${form.is_gemstone ? 'bg-primary-600' : 'bg-neutral-200'}`}>
-                  <div className={`w-4 h-4 rounded-full bg-white shadow transition-transform border border-neutral-200 ${form.is_gemstone ? 'translate-x-4' : 'translate-x-0'}`} />
-                </div>
-                <span className="text-xs text-neutral-600">Gemstone</span>
-              </label>
+          {/* Product Type Selector */}
+          <div>
+            <label className="label">Product Type</label>
+            <div className="grid grid-cols-4 gap-1.5">
+              {([
+                { value: 'simple', label: 'Simple', desc: 'Qty-based' },
+                { value: 'variant', label: 'Variant', desc: 'Size / colour' },
+                { value: 'weight', label: 'Weight', desc: 'Sold by weight' },
+                { value: 'gemstone', label: 'Gemstone', desc: 'Piece tracking' },
+              ] as { value: ProductType; label: string; desc: string }[]).map(t => (
+                <button key={t.value} type="button"
+                  onClick={() => setForm(f => ({ ...f, product_type: t.value, is_gemstone: t.value === 'gemstone' }))}
+                  className={`px-2 py-2 rounded-lg border text-left transition-colors ${form.product_type === t.value ? 'border-primary-500 bg-primary-50' : 'border-neutral-200 hover:border-neutral-300'}`}>
+                  <p className={`text-xs font-semibold ${form.product_type === t.value ? 'text-primary-700' : 'text-neutral-700'}`}>{t.label}</p>
+                  <p className="text-[10px] text-neutral-400">{t.desc}</p>
+                </button>
+              ))}
             </div>
-            <div className="flex items-center gap-2 pb-1">
+          </div>
+
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
               <div onClick={() => setForm(f => ({ ...f, low_stock_enabled: !f.low_stock_enabled }))}
                 className={`w-8 h-4 rounded-full transition-colors cursor-pointer flex-shrink-0 ${form.low_stock_enabled ? 'bg-primary-600' : 'bg-neutral-200'}`}>
                 <div className={`w-4 h-4 rounded-full bg-white shadow transition-transform border border-neutral-200 ${form.low_stock_enabled ? 'translate-x-4' : 'translate-x-0'}`} />
@@ -674,15 +784,16 @@ export default function Inventory() {
               <span className="text-xs text-neutral-600">Low stock alert</span>
             </div>
             {form.low_stock_enabled && (
-              <div>
-                <label className="label">Alert at qty</label>
-                <input type="number" value={form.low_stock_alert} onChange={e => setForm(f => ({ ...f, low_stock_alert: e.target.value }))} className="input text-xs" />
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-neutral-500">Alert at</label>
+                <input type="number" value={form.low_stock_alert} onChange={e => setForm(f => ({ ...f, low_stock_alert: e.target.value }))} className="input text-xs py-1.5 w-20" />
               </div>
             )}
           </div>
 
-          {form.is_gemstone && (
-            <div className="grid grid-cols-3 gap-2">
+          {/* Weight unit — for gemstone and weight types */}
+          {(form.product_type === 'gemstone' || form.product_type === 'weight') && (
+            <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="label">Weight Unit</label>
                 <select value={form.weight_unit} onChange={e => setForm(f => ({ ...f, weight_unit: e.target.value as 'grams' | 'carats' }))} className="input text-xs">
@@ -690,26 +801,78 @@ export default function Inventory() {
                   <option value="carats">Carats (ct)</option>
                 </select>
               </div>
+              {form.product_type === 'weight' && (
+                <div>
+                  <label className="label">Total Stock (weight)</label>
+                  <input type="number" value={form.total_weight} onChange={e => setForm(f => ({ ...f, total_weight: e.target.value }))} className="input text-xs" placeholder="0" />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Prices — hidden for variant (each variant has own price) */}
+          {form.product_type !== 'variant' && (
+            <div className="grid grid-cols-2 gap-2">
+              {isAdmin && (
+                <div>
+                  <label className="label">Purchase Price (₹)</label>
+                  <input type="number" value={form.purchase_price} onChange={e => setForm(f => ({ ...f, purchase_price: e.target.value }))} className="input" placeholder="0" />
+                </div>
+              )}
               <div>
-                <label className="label">Piece tracking</label>
-                <div className="input text-xs bg-neutral-50 text-neutral-500">Tracked from stock entry weights</div>
+                <label className="label">Selling Price (₹)</label>
+                <input type="number" value={form.selling_price} onChange={e => setForm(f => ({ ...f, selling_price: e.target.value }))} className="input" placeholder="0" />
               </div>
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-2">
-            {isAdmin && (
-              <div>
-                <label className="label">Purchase Price (₹)</label>
-                <input type="number" value={form.purchase_price} onChange={e => setForm(f => ({ ...f, purchase_price: e.target.value }))} className="input" placeholder="0" />
-              </div>
-            )}
+          {/* Variant rows */}
+          {form.product_type === 'variant' && (
             <div>
-              <label className="label">Selling Price (₹)</label>
-              <input type="number" value={form.selling_price} onChange={e => setForm(f => ({ ...f, selling_price: e.target.value }))} className="input" placeholder="0" />
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="label mb-0">Variants</label>
+                <button type="button" onClick={() => setEditingVariants(v => [...v, {
+                  id: `new-${Date.now()}`, product_id: editing?.id || '',
+                  name: '', sku: generateId('VAR'), stock_quantity: 0,
+                  purchase_price: 0, selling_price: 0, is_active: true,
+                }])} className="btn-ghost text-xs py-1">
+                  <Plus className="w-3 h-3" /> Add Variant
+                </button>
+              </div>
+              <div className="border border-neutral-200 rounded-lg overflow-hidden">
+                <table className="w-full">
+                  <thead className="bg-neutral-50">
+                    <tr>
+                      <th className="table-header text-left">Name</th>
+                      <th className="table-header text-left w-28">SKU</th>
+                      {isAdmin && <th className="table-header text-right w-24">Buy (₹)</th>}
+                      <th className="table-header text-right w-24">Sell (₹)</th>
+                      <th className="table-header text-right w-20">Stock</th>
+                      <th className="table-header w-8" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {editingVariants.map((v, vi) => (
+                      <tr key={v.id} className="border-t border-neutral-100">
+                        <td className="px-2 py-1.5"><input value={v.name} onChange={e => setEditingVariants(vs => { const n=[...vs]; n[vi]={...n[vi],name:e.target.value}; return n; })} className="input text-xs py-1" placeholder='e.g. 4 inch' /></td>
+                        <td className="px-2 py-1.5"><input value={v.sku} onChange={e => setEditingVariants(vs => { const n=[...vs]; n[vi]={...n[vi],sku:e.target.value}; return n; })} className="input text-xs py-1 font-mono" /></td>
+                        {isAdmin && <td className="px-2 py-1.5"><input type="number" value={v.purchase_price} onChange={e => setEditingVariants(vs => { const n=[...vs]; n[vi]={...n[vi],purchase_price:parseFloat(e.target.value)||0}; return n; })} className="input text-xs py-1 text-right" /></td>}
+                        <td className="px-2 py-1.5"><input type="number" value={v.selling_price} onChange={e => setEditingVariants(vs => { const n=[...vs]; n[vi]={...n[vi],selling_price:parseFloat(e.target.value)||0}; return n; })} className="input text-xs py-1 text-right" /></td>
+                        <td className="px-2 py-1.5"><input type="number" value={v.stock_quantity} onChange={e => setEditingVariants(vs => { const n=[...vs]; n[vi]={...n[vi],stock_quantity:parseFloat(e.target.value)||0}; return n; })} className="input text-xs py-1 text-right" /></td>
+                        <td className="px-2 py-1.5"><button onClick={() => setEditingVariants(vs => vs.filter((_,i)=>i!==vi))} className="text-neutral-400 hover:text-error-500"><X className="w-3.5 h-3.5" /></button></td>
+                      </tr>
+                    ))}
+                    {editingVariants.length === 0 && (
+                      <tr><td colSpan={6} className="px-3 py-4 text-center text-xs text-neutral-400">No variants yet. Click "Add Variant" to create one.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-          {godowns.length > 0 && !form.is_gemstone && (
+          )}
+
+          {/* Opening stock per godown — simple and weight types */}
+          {godowns.length > 0 && form.product_type !== 'gemstone' && form.product_type !== 'variant' && (
             <div className="col-span-2">
               <label className="label">{editing ? 'Stock per Godown' : 'Opening Stock per Godown'}</label>
               <div className="grid grid-cols-2 gap-2">
@@ -730,18 +893,16 @@ export default function Inventory() {
                   </div>
                 ))}
               </div>
-              {editing && (
-                <p className="text-[10px] text-neutral-400 mt-1">Updating these values will directly set the stock quantity per godown</p>
-              )}
+              {editing && <p className="text-[10px] text-neutral-400 mt-1">Updating these values will directly set the stock quantity per godown</p>}
             </div>
           )}
-          {form.is_gemstone && (
+          {form.product_type === 'gemstone' && (
             <div className="col-span-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
               <p className="text-xs font-semibold text-amber-800 mb-0.5">How to add gemstone stock</p>
               <p className="text-xs text-amber-700">
                 {editing
-                  ? 'To add pieces, close this dialog and click the \u2195 (Stock In/Out) button next to this product. Enter one weight per line under "Purchase (In)".'
-                  : 'After saving, click the \u2195 (Stock In/Out) button next to this product to add individual pieces with their weights.'}
+                  ? 'To add pieces, close this dialog and click the Pieces button next to this product. Enter one weight per line.'
+                  : 'After saving, click the Pieces button next to this product to add individual pieces with their weights.'}
               </p>
             </div>
           )}

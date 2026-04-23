@@ -15,7 +15,7 @@ import { fetchCompanies } from '../../lib/companiesService';
 import type { Company } from '../../lib/companiesService';
 import SalesOrderPrint from './SalesOrderPrint';
 import ProductCombobox from '../../components/ui/ProductCombobox';
-import type { SalesOrder, SalesOrderItem, Product, ProductUnit, Customer, Godown } from '../../types';
+import type { SalesOrder, SalesOrderItem, Product, ProductUnit, ProductVariant, ProductType, Customer, Godown } from '../../types';
 import type { ActivePage } from '../../types';
 import type { PageState } from '../../App';
 
@@ -31,6 +31,8 @@ interface LineItem {
   godown_id: string;
   product_unit_ids?: string[];
   gemstone_weight?: number;
+  variant_id?: string;
+  weight_input?: string;
 }
 
 interface SalesOrdersProps {
@@ -69,6 +71,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const [cancelSOTarget, setCancelSOTarget] = useState<SalesOrder | null>(null);
   const [openRowMenu, setOpenRowMenu] = useState<string | null>(null);
   const [lineUnits, setLineUnits] = useState<Record<number, ProductUnit[]>>({});
+  const [variantsMap, setVariantsMap] = useState<Record<string, ProductVariant[]>>({});
 
   const customerSelectRef = useRef<HTMLSelectElement>(null);
   const shipToNameRef = useRef<HTMLInputElement>(null);
@@ -135,14 +138,15 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   }, [openRowMenu]);
 
   const loadData = async () => {
-    const [ordersRes, productsRes, customersRes, godownsData] = await Promise.all([
+    const [ordersRes, productsRes, customersRes, godownsData, variantsRes] = await Promise.all([
       supabase.from('sales_orders').select('*').order('created_at', { ascending: false }),
-      supabase.from('products').select('id, name, unit, selling_price, stock_quantity, is_gemstone, weight_unit, low_stock_alert').eq('is_active', true).order('name'),
+      supabase.from('products').select('id, name, unit, selling_price, stock_quantity, is_gemstone, weight_unit, low_stock_alert, product_type').eq('is_active', true).order('name'),
       supabase.from('customers').select('id, name, phone, address, address2, city, state, pincode, balance, total_revenue').eq('is_active', true).order('name'),
       fetchGodowns(),
+      supabase.from('product_variants').select('*').eq('is_active', true).order('name'),
     ]);
     setOrders(ordersRes.data || []);
-    setProducts(((productsRes.data || []) as Array<{ id: string; name: string; unit: string; selling_price: number; stock_quantity: number; is_gemstone?: boolean; weight_unit?: string; low_stock_alert?: number }>).map(p => ({
+    setProducts(((productsRes.data || []) as Array<{ id: string; name: string; unit: string; selling_price: number; stock_quantity: number; is_gemstone?: boolean; weight_unit?: string; low_stock_alert?: number; product_type?: string }>).map(p => ({
       id: p.id,
       name: p.name,
       unit: p.unit,
@@ -157,7 +161,14 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       updated_at: '',
       is_gemstone: !!p.is_gemstone,
       weight_unit: (p.weight_unit as 'grams' | 'carats' | undefined),
+      product_type: (p.product_type as ProductType | undefined),
     })));
+    const byVariant: Record<string, ProductVariant[]> = {};
+    for (const v of ((variantsRes.data || []) as ProductVariant[])) {
+      byVariant[v.product_id] = byVariant[v.product_id] || [];
+      byVariant[v.product_id].push(v);
+    }
+    setVariantsMap(byVariant);
     setCustomers(((customersRes.data || []) as Array<{ id: string; name: string; phone?: string; address?: string; address2?: string; city?: string; state?: string; pincode?: string; balance?: number; total_revenue?: number }>).map(c => ({
       id: c.id,
       name: c.name,
@@ -233,11 +244,20 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     setLineUnits(prev => ({ ...prev, [lineIndex]: (data || []) as ProductUnit[] }));
   };
 
+  const getProductType = (p: Product): ProductType =>
+    (p.product_type as ProductType) || (p.is_gemstone ? 'gemstone' : 'simple');
+
   const handleProductSelect = useCallback(async (i: number, product: Product) => {
+    const pType = getProductType(product);
     setItems(prev => {
       const next = [...prev];
-      next[i] = { ...next[i], product_id: product.id, product_name: product.name, unit: product.unit, unit_price: String(product.selling_price), b2b_price: String(product.selling_price), quantity: '1', product_unit_ids: [], gemstone_weight: 0 };
-      next[i].total_price = product.is_gemstone ? 0 : (product.selling_price || 0);
+      next[i] = {
+        ...next[i], product_id: product.id, product_name: product.name, unit: product.unit,
+        unit_price: String(product.selling_price), b2b_price: String(product.selling_price),
+        quantity: pType === 'gemstone' ? '0' : (pType === 'weight' ? '0' : '1'),
+        product_unit_ids: [], gemstone_weight: 0, variant_id: undefined, weight_input: '',
+      };
+      next[i].total_price = pType === 'gemstone' || pType === 'weight' ? 0 : (product.selling_price || 0);
       return next;
     });
 
@@ -302,12 +322,35 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       next[i] = { ...next[i], [field]: value };
       if (field === 'product_id') {
         const p = products.find(p => p.id === value);
-        if (p) { next[i].product_name = p.name; next[i].unit = p.unit; next[i].unit_price = String(p.selling_price); next[i].b2b_price = String(p.selling_price); next[i].product_unit_ids = []; next[i].gemstone_weight = 0; }
+        if (p) {
+          const pType = getProductType(p);
+          next[i].product_name = p.name; next[i].unit = p.unit;
+          next[i].unit_price = String(p.selling_price); next[i].b2b_price = String(p.selling_price);
+          next[i].product_unit_ids = []; next[i].gemstone_weight = 0;
+          next[i].variant_id = undefined; next[i].weight_input = '';
+          next[i].quantity = pType === 'gemstone' || pType === 'weight' ? '0' : '1';
+        }
       }
-      const isGem = !!products.find(p => p.id === next[i].product_id)?.is_gemstone;
-      if (isGem) {
+      if (field === 'variant_id') {
+        const prod = products.find(p => p.id === next[i].product_id);
+        const variant = (variantsMap[next[i].product_id] || []).find(v => v.id === value);
+        if (variant) {
+          next[i].unit_price = String(variant.selling_price);
+          next[i].b2b_price = String(variant.selling_price);
+        } else if (prod) {
+          next[i].unit_price = String(prod.selling_price);
+          next[i].b2b_price = String(prod.selling_price);
+        }
+      }
+      const prod = products.find(p => p.id === next[i].product_id);
+      const pType = prod ? getProductType(prod) : 'simple';
+      if (pType === 'gemstone') {
         const gw = next[i].gemstone_weight || 0;
         next[i].total_price = gw * (parseFloat(next[i].unit_price) || 0);
+      } else if (pType === 'weight') {
+        const w = parseFloat(next[i].weight_input || '0') || 0;
+        next[i].quantity = String(w);
+        next[i].total_price = w * (parseFloat(next[i].unit_price) || 0);
       } else {
         const qty = parseFloat(next[i].quantity) || 0;
         next[i].total_price = qty * (parseFloat(next[i].unit_price) || 0);
@@ -471,6 +514,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           b2b_price: i.b2b_price !== '' ? parseFloat(i.b2b_price) || null : null,
           godown_id: i.godown_id || null,
           gemstone_weight: (i.gemstone_weight || 0) > 0 ? i.gemstone_weight : null,
+          variant_id: i.variant_id || null,
         })),
       });
       const selectedUnitIds = itemsWithProduct.flatMap(i => i.product_unit_ids || []);
@@ -561,6 +605,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           godown_id: i.godown_id || null,
           product_unit_ids: i.product_unit_ids || [],
           gemstone_weight: (i.gemstone_weight || 0) > 0 ? i.gemstone_weight : null,
+          variant_id: i.variant_id || null,
         }))
       );
       if (insertItemsErr) throw insertItemsErr;
@@ -624,6 +669,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
             godown_id: i.godown_id || '',
             product_unit_ids: i.product_unit_ids || [],
             gemstone_weight: (i as Record<string, any>).gemstone_weight || undefined,
+            variant_id: (i as Record<string, any>).variant_id || undefined,
+            weight_input: String((i as Record<string, any>).gemstone_weight || i.quantity || ''),
           }))
         : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '', product_unit_ids: [] }]
     );
@@ -1143,9 +1190,14 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                 </thead>
                 <tbody>
                   {items.map((item, i) => {
-                    const stock = getStockForItem(item, i);
-                    const qty = parseFloat(item.quantity) || 0;
+                    const prod = products.find(p => p.id === item.product_id);
+                    const pType: ProductType = prod ? getProductType(prod) : 'simple';
+                    const wLabel = prod?.weight_unit === 'carats' ? 'ct' : 'g';
+                    const prodVariants = item.product_id ? (variantsMap[item.product_id] || []) : [];
+                    const units = lineUnits[i] || [];
+                    const s = pType === 'gemstone' ? (lineUnits[i]?.length ?? undefined) : godownStockMap[item.product_id];
                     return (
+                      <>
                       <tr key={i} className="border-t border-neutral-100">
                         <td className="px-3 py-2">
                           <ProductCombobox
@@ -1155,6 +1207,12 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                             inputRef={getProductRef(i)}
                             godownStockMap={godownStockMap}
                           />
+                          {pType === 'variant' && prodVariants.length > 0 && (
+                            <select value={item.variant_id || ''} onChange={e => updateItem(i, 'variant_id', e.target.value)} className="input text-xs mt-1">
+                              <option value="">-- Select Variant --</option>
+                              {prodVariants.map(v => <option key={v.id} value={v.id}>{v.name} (stock: {v.stock_quantity})</option>)}
+                            </select>
+                          )}
                         </td>
                         <td className="px-3 py-2 w-32">
                           <select value={item.godown_id} onChange={e => {
@@ -1165,80 +1223,77 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                           }} className="input text-xs py-1">
                             {godowns.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                           </select>
-                          {item.product_id && (() => {
-                            const isGem = !!products.find(p => p.id === item.product_id)?.is_gemstone;
-                            const s = isGem ? (lineUnits[i]?.length ?? undefined) : godownStockMap[item.product_id];
-                            return s !== undefined ? (
-                              <p className={`text-[10px] mt-0.5 text-right font-medium ${s === 0 ? 'text-error-600' : s <= (products.find(p=>p.id===item.product_id)?.low_stock_alert||5) ? 'text-warning-600' : 'text-success-600'}`}>
-                                {s} {isGem ? 'piece(s)' : 'in stock'}
-                              </p>
-                            ) : null;
-                          })()}
+                          {item.product_id && s !== undefined && (
+                            <p className={`text-[10px] mt-0.5 text-right font-medium ${s === 0 ? 'text-error-600' : s <= (prod?.low_stock_alert||5) ? 'text-warning-600' : 'text-success-600'}`}>
+                              {s} {pType === 'gemstone' ? 'pcs' : 'in stock'}
+                            </p>
+                          )}
                         </td>
                         <td className="px-3 py-2 w-20">
-                          <input ref={getQtyRef(i)} type="number" readOnly={!!products.find(p => p.id === item.product_id)?.is_gemstone} value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} onKeyDown={e => handleQtyKeyDown(e, i)} className="input text-xs text-right" />
-                          {products.find(p => p.id === item.product_id)?.is_gemstone && (
-                            <p className="text-[10px] text-neutral-400 mt-0.5 text-right">auto</p>
+                          {pType === 'weight' ? (
+                            <>
+                              <input ref={getQtyRef(i)} type="number" step="0.001" value={item.weight_input || ''} onChange={e => updateItem(i, 'weight_input', e.target.value)} onKeyDown={e => handleQtyKeyDown(e, i)} className="input text-xs text-right" placeholder="0.000" />
+                              <p className="text-[10px] text-neutral-400 mt-0.5 text-right">{wLabel}</p>
+                            </>
+                          ) : pType === 'gemstone' ? (
+                            <>
+                              <div className="text-right text-sm font-semibold text-neutral-800">{item.quantity}</div>
+                              <p className="text-[10px] text-neutral-400 mt-0.5 text-right">pcs (auto)</p>
+                            </>
+                          ) : (
+                            <input ref={getQtyRef(i)} type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} onKeyDown={e => handleQtyKeyDown(e, i)} className="input text-xs text-right" />
                           )}
                         </td>
                         <td className="px-3 py-2 w-24">
                           <input type="number" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', e.target.value)} className="input text-xs text-right" />
-                          {!!products.find(p => p.id === item.product_id)?.is_gemstone && (
-                            <p className="text-[10px] text-neutral-400 mt-0.5 text-right">per {products.find(p => p.id === item.product_id)?.weight_unit === 'carats' ? 'ct' : 'g'}</p>
+                          {(pType === 'gemstone' || pType === 'weight') && (
+                            <p className="text-[10px] text-neutral-400 mt-0.5 text-right">per {wLabel}</p>
                           )}
                         </td>
                         <td className={`px-3 py-2 w-24 ${!form.is_b2b ? 'hidden' : ''}`}><input type="number" value={item.b2b_price} onChange={e => updateItem(i, 'b2b_price', e.target.value)} placeholder={item.unit_price} className="input text-xs text-right" /></td>
                         <td className="px-3 py-2 w-24 text-right text-sm font-medium">
                           {formatCurrency(item.total_price)}
-                          {(item.gemstone_weight || 0) > 0 && (
-                            <p className="text-[10px] text-neutral-400 font-normal mt-0.5">{item.gemstone_weight}{products.find(p=>p.id===item.product_id)?.weight_unit==='carats'?'ct':'g'} &times; {formatCurrency(parseFloat(item.unit_price)||0)}</p>
+                          {pType === 'gemstone' && (item.gemstone_weight || 0) > 0 && (
+                            <p className="text-[10px] text-neutral-400 font-normal mt-0.5">{item.gemstone_weight}{wLabel} &times; {formatCurrency(parseFloat(item.unit_price)||0)}</p>
+                          )}
+                          {pType === 'weight' && (parseFloat(item.weight_input||'0')||0) > 0 && (
+                            <p className="text-[10px] text-neutral-400 font-normal mt-0.5">{item.weight_input}{wLabel} &times; {formatCurrency(parseFloat(item.unit_price)||0)}</p>
                           )}
                         </td>
                         <td className="px-3 py-2 w-8"><button onClick={() => removeItem(i)} className="text-neutral-400 hover:text-error-500 text-lg leading-none">&times;</button></td>
                       </tr>
-                    );
-                  })}
-                  {items.map((item, i) => {
-                    const isGem = !!products.find(p => p.id === item.product_id)?.is_gemstone;
-                    if (!isGem || !item.product_id) return null;
-                    const units = lineUnits[i] || [];
-                    return (
-                      <tr key={`units-${i}`} className="border-t border-neutral-50 bg-neutral-50/70">
-                        <td colSpan={7} className="px-3 py-2">
-                          <p className="text-[10px] font-semibold text-neutral-500 mb-1">Select pieces</p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {units.map(u => {
-                              const checked = (item.product_unit_ids || []).includes(u.id);
-                              return (
-                                <label key={u.id} className={`px-2 py-1 rounded-full border text-[10px] cursor-pointer ${checked ? 'bg-primary-50 border-primary-300 text-primary-700' : 'bg-white border-neutral-200 text-neutral-600'}`}>
-                                  <input
-                                    type="checkbox"
-                                    className="mr-1"
-                                    checked={checked}
-                                    onChange={e => {
-                                      setItems(prev => {
-                                        const next = [...prev];
-                                        const existing = new Set(next[i].product_unit_ids || []);
-                                        if (e.target.checked) existing.add(u.id); else existing.delete(u.id);
-                                        const ids = Array.from(existing);
-                                        const allUnits = lineUnits[i] || [];
-                                        const totalWeight = allUnits
-                                          .filter(pu => ids.includes(pu.id))
-                                          .reduce((s, pu) => s + (pu.weight || 0), 0);
-                                        const unitPrice = parseFloat(next[i].unit_price) || 0;
-                                        next[i] = { ...next[i], product_unit_ids: ids, quantity: String(ids.length), gemstone_weight: totalWeight, total_price: totalWeight * unitPrice };
-                                        return next;
-                                      });
-                                    }}
-                                  />
-                                  {u.weight} {u.weight_unit}
-                                </label>
-                              );
-                            })}
-                            {units.length === 0 && <span className="text-[10px] text-neutral-400">No available pieces</span>}
-                          </div>
-                        </td>
-                      </tr>
+                      {pType === 'gemstone' && item.product_id && (
+                        <tr key={`units-${i}`} className="border-t border-neutral-50 bg-neutral-50/70">
+                          <td colSpan={7} className="px-3 py-2">
+                            <p className="text-[10px] font-semibold text-neutral-500 mb-1">Select pieces</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {units.map(u => {
+                                const checked = (item.product_unit_ids || []).includes(u.id);
+                                return (
+                                  <label key={u.id} className={`px-2 py-1 rounded-full border text-[10px] cursor-pointer ${checked ? 'bg-primary-50 border-primary-300 text-primary-700' : 'bg-white border-neutral-200 text-neutral-600'}`}>
+                                    <input type="checkbox" className="mr-1" checked={checked}
+                                      onChange={e => {
+                                        setItems(prev => {
+                                          const next = [...prev];
+                                          const existing = new Set(next[i].product_unit_ids || []);
+                                          if (e.target.checked) existing.add(u.id); else existing.delete(u.id);
+                                          const ids = Array.from(existing);
+                                          const totalWeight = units.filter(pu => ids.includes(pu.id)).reduce((s, pu) => s + (pu.weight || 0), 0);
+                                          const unitPrice = parseFloat(next[i].unit_price) || 0;
+                                          next[i] = { ...next[i], product_unit_ids: ids, quantity: String(ids.length), gemstone_weight: totalWeight, total_price: totalWeight * unitPrice };
+                                          return next;
+                                        });
+                                      }} />
+                                    {u.weight} {u.weight_unit}
+                                  </label>
+                                );
+                              })}
+                              {units.length === 0 && <span className="text-[10px] text-neutral-400">No available pieces in this godown</span>}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </>
                     );
                   })}
                 </tbody>
