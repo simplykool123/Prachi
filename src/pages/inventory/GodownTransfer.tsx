@@ -14,6 +14,14 @@ interface ProductOption {
   name: string;
   unit: string;
   stock_quantity: number;
+  product_type?: string;
+}
+
+interface VariantOption {
+  id: string;
+  product_id: string;
+  name: string;
+  sku: string;
 }
 
 interface TransferItem {
@@ -22,6 +30,8 @@ interface TransferItem {
   unit: string;
   quantity: string;
   available_qty: number;
+  variant_id?: string;
+  variant_name?: string;
 }
 
 interface Transfer {
@@ -46,6 +56,8 @@ interface TransferDetail {
   product_name: string;
   unit: string;
   quantity: number;
+  variant_id?: string;
+  variant_name?: string;
 }
 
 export default function GodownTransfer() {
@@ -53,6 +65,7 @@ export default function GodownTransfer() {
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [godowns, setGodowns] = useState<Godown[]>([]);
   const [products, setProducts] = useState<ProductOption[]>([]);
+  const [variantsMap, setVariantsMap] = useState<Record<string, VariantOption[]>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -79,9 +92,10 @@ export default function GodownTransfer() {
 
   const loadData = async () => {
     setLoading(true);
-    const [godownsRes, productsRes, transfersRes] = await Promise.all([
+    const [godownsRes, productsRes, variantsRes, transfersRes] = await Promise.all([
       supabase.from('godowns').select('*').eq('is_active', true).order('name'),
-      supabase.from('products').select('id, name, unit, stock_quantity').eq('is_active', true).order('name'),
+      supabase.from('products').select('id, name, unit, stock_quantity, product_type').eq('is_active', true).order('name'),
+      supabase.from('product_variants').select('id, product_id, name, sku').eq('is_active', true).order('name'),
       supabase.from('godown_transfers').select('*')
         .gte('transfer_date', dateRange.from)
         .lte('transfer_date', dateRange.to)
@@ -89,6 +103,12 @@ export default function GodownTransfer() {
     ]);
     setGodowns(godownsRes.data || []);
     setProducts((productsRes.data || []) as ProductOption[]);
+    const vMap: Record<string, VariantOption[]> = {};
+    for (const v of ((variantsRes.data || []) as VariantOption[])) {
+      vMap[v.product_id] = vMap[v.product_id] || [];
+      vMap[v.product_id].push(v);
+    }
+    setVariantsMap(vMap);
     if (transfersRes.error && 'code' in transfersRes.error && transfersRes.error.code === 'PGRST205') {
       setTablesMissing(true);
     } else {
@@ -102,12 +122,21 @@ export default function GodownTransfer() {
     if (godownStockMap[godownId]) return;
     const { data } = await supabase
       .from('godown_stock')
-      .select('product_id, quantity')
+      .select('product_id, variant_id, quantity')
       .eq('godown_id', godownId);
+    // Key: for variant rows use "productId:variantId", for simple rows use "productId"
     const stockMap: Record<string, number> = {};
-    (data || []).forEach(r => { stockMap[r.product_id] = r.quantity || 0; });
+    (data || []).forEach((r: any) => {
+      const key = r.variant_id ? `${r.product_id}:${r.variant_id}` : r.product_id;
+      stockMap[key] = (stockMap[key] || 0) + (r.quantity || 0);
+    });
     setGodownStockMap(prev => ({ ...prev, [godownId]: stockMap }));
     return stockMap;
+  };
+
+  const getAvailableQty = (stockMap: Record<string, number>, productId: string, variantId?: string) => {
+    if (variantId) return stockMap[`${productId}:${variantId}`] || 0;
+    return stockMap[productId] || 0;
   };
 
   const handleFromGodownChange = async (godownId: string) => {
@@ -116,7 +145,7 @@ export default function GodownTransfer() {
       const map = godownStockMap[godownId] || await loadGodownStock(godownId) || {};
       setItems(prev => prev.map(item => ({
         ...item,
-        available_qty: item.product_id ? (map[item.product_id] || 0) : 0,
+        available_qty: item.product_id ? getAvailableQty(map, item.product_id, item.variant_id) : 0,
       })));
     }
   };
@@ -136,9 +165,17 @@ export default function GodownTransfer() {
         if (p) {
           next[i].product_name = p.name;
           next[i].unit = p.unit;
+          next[i].variant_id = undefined;
+          next[i].variant_name = undefined;
           const stockMap = godownStockMap[form.from_godown_id] || {};
-          next[i].available_qty = stockMap[p.id] || 0;
+          next[i].available_qty = getAvailableQty(stockMap, p.id);
         }
+      }
+      if (field === 'variant_id') {
+        const variant = (variantsMap[next[i].product_id] || []).find(v => v.id === value);
+        next[i].variant_name = variant?.name || undefined;
+        const stockMap = godownStockMap[form.from_godown_id] || {};
+        next[i].available_qty = value ? getAvailableQty(stockMap, next[i].product_id, value) : getAvailableQty(stockMap, next[i].product_id);
       }
       return next;
     });
@@ -169,9 +206,10 @@ export default function GodownTransfer() {
     const fromMap = godownStockMap[form.from_godown_id] || {};
     for (const item of validItems) {
       const qty = parseFloat(item.quantity);
-      const avail = fromMap[item.product_id] || 0;
+      const avail = getAvailableQty(fromMap, item.product_id, item.variant_id);
+      const label = item.variant_name ? `${item.product_name} (${item.variant_name})` : item.product_name;
       if (qty > avail) {
-        errors.push(`${item.product_name}: only ${avail} available, requested ${qty}`);
+        errors.push(`${label}: only ${avail} available, requested ${qty}`);
       }
     }
     if (errors.length > 0) {
@@ -201,13 +239,18 @@ export default function GodownTransfer() {
 
     if (transfer) {
       const { error: itemsError } = await supabase.from('godown_transfer_items').insert(
-        validItems.map(item => ({
-          transfer_id: transfer.id,
-          product_id: item.product_id,
-          product_name: item.product_name,
-          unit: item.unit,
-          quantity: parseFloat(item.quantity),
-        }))
+        validItems.map(item => {
+          const displayName = item.variant_name ? `${item.product_name} (${item.variant_name})` : item.product_name;
+          return {
+            transfer_id: transfer.id,
+            product_id: item.product_id,
+            product_name: displayName,
+            unit: item.unit,
+            quantity: parseFloat(item.quantity),
+            variant_id: item.variant_id || null,
+            variant_name: item.variant_name || null,
+          };
+        })
       );
       if (itemsError) throw itemsError;
 
@@ -215,11 +258,13 @@ export default function GodownTransfer() {
         product_id: item.product_id,
         godown_id: form.from_godown_id,
         quantity: parseFloat(item.quantity),
+        variant_id: item.variant_id || null,
       }));
       const inItems = validItems.map(item => ({
         product_id: item.product_id,
         godown_id: form.to_godown_id,
         quantity: parseFloat(item.quantity),
+        variant_id: item.variant_id || null,
       }));
 
       await processStockMovement({
@@ -501,47 +546,63 @@ create policy "Allow all for authenticated" on godown_transfer_items for all to 
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((item, i) => (
-                    <tr key={i} className="border-t border-neutral-100">
-                      <td className="px-3 py-2">
-                        <select
-                          value={item.product_id}
-                          onChange={e => updateItem(i, 'product_id', e.target.value)}
-                          className="input text-xs py-1"
-                        >
-                          <option value="">Select product...</option>
-                          {products.map(p => (
-                            <option key={p.id} value={p.id}>{p.name}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        {item.product_id ? (
-                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${item.available_qty <= 0 ? 'bg-error-50 text-error-600' : item.available_qty <= 5 ? 'bg-warning-50 text-warning-700' : 'bg-success-50 text-success-700'}`}>
-                            {item.available_qty} {item.unit}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-neutral-300">—</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          min="1"
-                          max={item.available_qty}
-                          value={item.quantity}
-                          onChange={e => updateItem(i, 'quantity', e.target.value)}
-                          className="input text-xs py-1 text-center w-full"
-                          placeholder="Qty"
-                        />
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        {items.length > 1 && (
-                          <button onClick={() => removeItem(i)} className="text-neutral-300 hover:text-error-500 transition-colors text-xs">✕</button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                  {items.map((item, i) => {
+                    const isVariant = item.product_id && products.find(p => p.id === item.product_id)?.product_type === 'variant';
+                    const productVariants = item.product_id ? (variantsMap[item.product_id] || []) : [];
+                    return (
+                      <tr key={i} className="border-t border-neutral-100">
+                        <td className="px-3 py-2">
+                          <select
+                            value={item.product_id}
+                            onChange={e => updateItem(i, 'product_id', e.target.value)}
+                            className="input text-xs py-1"
+                          >
+                            <option value="">Select product...</option>
+                            {products.map(p => (
+                              <option key={p.id} value={p.id}>{p.name}{p.product_type === 'variant' ? ' ▼' : ''}</option>
+                            ))}
+                          </select>
+                          {isVariant && productVariants.length > 0 && (
+                            <select
+                              value={item.variant_id || ''}
+                              onChange={e => updateItem(i, 'variant_id', e.target.value)}
+                              className="input text-xs py-1 mt-1"
+                            >
+                              <option value="">Select variant...</option>
+                              {productVariants.map(v => (
+                                <option key={v.id} value={v.id}>{v.name}{v.sku ? ` (${v.sku})` : ''}</option>
+                              ))}
+                            </select>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          {item.product_id && (!isVariant || item.variant_id) ? (
+                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${item.available_qty <= 0 ? 'bg-error-50 text-error-600' : item.available_qty <= 5 ? 'bg-warning-50 text-warning-700' : 'bg-success-50 text-success-700'}`}>
+                              {item.available_qty} {item.unit}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-neutral-300">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="number"
+                            min="1"
+                            max={item.available_qty}
+                            value={item.quantity}
+                            onChange={e => updateItem(i, 'quantity', e.target.value)}
+                            className="input text-xs py-1 text-center w-full"
+                            placeholder="Qty"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          {items.length > 1 && (
+                            <button onClick={() => removeItem(i)} className="text-neutral-300 hover:text-error-500 transition-colors text-xs">✕</button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

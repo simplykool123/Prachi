@@ -505,17 +505,21 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
         ship_to_state: form.is_b2b ? form.ship_to_state : null,
         ship_to_pin: form.is_b2b ? form.ship_to_pin : null,
         ship_to_phone: form.is_b2b ? form.ship_to_phone : null,
-        items: itemsWithProduct.map(i => ({
-          product_id: i.product_id,
-          product_name: i.product_name,
-          unit: i.unit,
-          quantity: parseFloat(i.quantity) || 0,
-          unit_price: parseFloat(i.unit_price) || 0,
-          b2b_price: i.b2b_price !== '' ? parseFloat(i.b2b_price) || null : null,
-          godown_id: i.godown_id || null,
-          gemstone_weight: (i.gemstone_weight || 0) > 0 ? i.gemstone_weight : null,
-          variant_id: i.variant_id || null,
-        })),
+        items: itemsWithProduct.map(i => {
+          const variant = i.variant_id ? (variantsMap[i.product_id] || []).find(v => v.id === i.variant_id) : undefined;
+          const displayName = variant ? `${i.product_name} (${variant.name})` : i.product_name;
+          return {
+            product_id: i.product_id,
+            product_name: displayName,
+            unit: i.unit,
+            quantity: parseFloat(i.quantity) || 0,
+            unit_price: parseFloat(i.unit_price) || 0,
+            b2b_price: i.b2b_price !== '' ? parseFloat(i.b2b_price) || null : null,
+            godown_id: i.godown_id || null,
+            gemstone_weight: (i.gemstone_weight || 0) > 0 ? i.gemstone_weight : null,
+            variant_id: i.variant_id || null,
+          };
+        }),
       });
       const selectedUnitIds = itemsWithProduct.flatMap(i => i.product_unit_ids || []);
       if (selectedUnitIds.length > 0) {
@@ -592,21 +596,25 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       const { error: delItemsErr } = await supabase.from('sales_order_items').delete().eq('sales_order_id', editOrder.id);
       if (delItemsErr) throw delItemsErr;
       const { error: insertItemsErr } = await supabase.from('sales_order_items').insert(
-        items.filter(i => i.product_name).map(i => ({
-          sales_order_id: editOrder.id,
-          product_id: i.product_id || null,
-          product_name: i.product_name,
-          unit: i.unit,
-          quantity: parseFloat(i.quantity) || 0,
-          unit_price: parseFloat(i.unit_price) || 0,
-          discount_pct: 0,
-          b2b_price: i.b2b_price !== '' ? parseFloat(i.b2b_price) || null : null,
-          total_price: i.total_price,
-          godown_id: i.godown_id || null,
-          product_unit_ids: i.product_unit_ids || [],
-          gemstone_weight: (i.gemstone_weight || 0) > 0 ? i.gemstone_weight : null,
-          variant_id: i.variant_id || null,
-        }))
+        items.filter(i => i.product_name).map(i => {
+          const variant = i.variant_id ? (variantsMap[i.product_id] || []).find(v => v.id === i.variant_id) : undefined;
+          const displayName = variant ? `${i.product_name} (${variant.name})` : i.product_name;
+          return {
+            sales_order_id: editOrder.id,
+            product_id: i.product_id || null,
+            product_name: displayName,
+            unit: i.unit,
+            quantity: parseFloat(i.quantity) || 0,
+            unit_price: parseFloat(i.unit_price) || 0,
+            discount_pct: 0,
+            b2b_price: i.b2b_price !== '' ? parseFloat(i.b2b_price) || null : null,
+            total_price: i.total_price,
+            godown_id: i.godown_id || null,
+            product_unit_ids: i.product_unit_ids || [],
+            gemstone_weight: (i.gemstone_weight || 0) > 0 ? i.gemstone_weight : null,
+            variant_id: i.variant_id || null,
+          };
+        })
       );
       if (insertItemsErr) throw insertItemsErr;
       const selectedUnitIds = itemsWithProduct.flatMap(i => i.product_unit_ids || []);

@@ -368,15 +368,20 @@ export default function Purchase() {
       }).eq('id', editingEntry.id);
 
       await supabase.from('purchase_entry_items').delete().eq('purchase_entry_id', editingEntry.id);
-      const updatedItems = items.filter(i => i.product_name).map(i => ({
-        purchase_entry_id: editingEntry.id,
-        product_id: i.product_id || null,
-        product_name: i.product_name,
-        unit: i.unit,
-        quantity: parseFloat(i.quantity) || 0,
-        unit_price: parseFloat(i.unit_price) || 0,
-        total_price: i.total_price,
-      }));
+      const updatedItems = items.filter(i => i.product_name).map(i => {
+        const variant = i.variant_id ? (variantsMap[i.product_id] || []).find(v => v.id === i.variant_id) : undefined;
+        const displayName = variant ? `${i.product_name} (${variant.name})` : i.product_name;
+        return {
+          purchase_entry_id: editingEntry.id,
+          product_id: i.product_id || null,
+          product_name: displayName,
+          unit: i.unit,
+          quantity: parseFloat(i.quantity) || 0,
+          unit_price: parseFloat(i.unit_price) || 0,
+          total_price: i.total_price,
+          variant_id: i.variant_id || null,
+        };
+      });
       await supabase.from('purchase_entry_items').insert(updatedItems);
       setEntryItems(prev => ({ ...prev, [editingEntry.id]: updatedItems }));
     } else {
@@ -396,15 +401,20 @@ export default function Purchase() {
       }).select().single();
 
       if (entry) {
-        const entryItemPayload = items.filter(i => i.product_name).map(i => ({
-          purchase_entry_id: entry.id,
-          product_id: i.product_id || null,
-          product_name: i.product_name,
-          unit: i.unit,
-          quantity: parseFloat(i.quantity) || 0,
-          unit_price: parseFloat(i.unit_price) || 0,
-          total_price: i.total_price,
-        }));
+        const entryItemPayload = items.filter(i => i.product_name).map(i => {
+          const variant = i.variant_id ? (variantsMap[i.product_id] || []).find(v => v.id === i.variant_id) : undefined;
+          const displayName = variant ? `${i.product_name} (${variant.name})` : i.product_name;
+          return {
+            purchase_entry_id: entry.id,
+            product_id: i.product_id || null,
+            product_name: displayName,
+            unit: i.unit,
+            quantity: parseFloat(i.quantity) || 0,
+            unit_price: parseFloat(i.unit_price) || 0,
+            total_price: i.total_price,
+            variant_id: i.variant_id || null,
+          };
+        });
         await supabase.from('purchase_entry_items').insert(entryItemPayload);
 
         // Create product_units for gemstone items and receive stock immediately
@@ -433,6 +443,7 @@ export default function Purchase() {
               godown_id: form.godown_id,
               quantity: parseFloat(i.quantity) || 0,
               unit_price: parseFloat(i.unit_price) || 0,
+              variant_id: i.variant_id || null,
             }));
           if (stockItems.length > 0) {
             await processStockMovement({

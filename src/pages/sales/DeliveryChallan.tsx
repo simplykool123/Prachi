@@ -26,6 +26,7 @@ interface LineItem {
   godown_id: string;
   gemstone_weight?: number;
   product_unit_ids?: string[];
+  variant_id?: string | null;
 }
 
 interface ChallanItem {
@@ -173,6 +174,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
       setItems(soItems.map((i: SalesOrderItem) => {
         const gemW = (i as Record<string, any>).gemstone_weight as number | undefined;
         const unitIds = (i as Record<string, any>).product_unit_ids as string[] | undefined;
+        const varId = (i as Record<string, any>).variant_id as string | undefined;
         return {
           product_id: i.product_id || '',
           product_name: i.product_name,
@@ -184,6 +186,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
           godown_id: i.godown_id || godowns[0]?.id || '',
           gemstone_weight: gemW || undefined,
           product_unit_ids: unitIds || undefined,
+          variant_id: varId || null,
         };
       }));
     }
@@ -293,6 +296,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
         discount_pct: parseFloat(i.discount_pct) || 0,
         total_price: i.total_price,
         gemstone_weight: (i.gemstone_weight || 0) > 0 ? i.gemstone_weight : null,
+        variant_id: i.variant_id || null,
       }))
     );
     setShowModal(false);
@@ -360,6 +364,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
             godown_id: (i as Record<string, any>).godown_id || '',
             gemstone_weight: (i as Record<string, any>).gemstone_weight || undefined,
             product_unit_ids: (i as Record<string, any>).product_unit_ids || undefined,
+            variant_id: (i as Record<string, any>).variant_id || null,
           }))
         : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '' }]
     );
