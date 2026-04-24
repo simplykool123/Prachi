@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Package, AlertTriangle, Search, TrendingUp, TrendingDown, RefreshCw, X, ChevronRight, ChevronDown } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { formatCurrency, formatDate } from '../../lib/utils';
@@ -410,9 +410,8 @@ export default function GodownStockPage() {
                     const gemGodownPieces = isGem ? (p.pieces_by_godown || {}) : null;
 
                     return (
-                      <>
+                      <React.Fragment key={p.product_id}>
                         <tr
-                          key={p.product_id}
                           className={`border-b border-neutral-50 transition-colors cursor-pointer ${
                             isVariant ? 'hover:bg-blue-50/40' : isGem ? 'hover:bg-amber-50/30' : 'hover:bg-primary-50/40'
                           } ${isLow ? 'bg-warning-50/30' : ''}`}
@@ -568,7 +567,7 @@ export default function GodownStockPage() {
                             );
                           });
                         })()}
-                      </>
+                      </React.Fragment>
                     );
                   })}
                 </tbody>

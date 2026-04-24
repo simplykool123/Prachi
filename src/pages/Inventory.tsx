@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Plus, ArrowUpDown, Search, BarChart2, AlertTriangle, ImagePlus, Download, History, Pencil, Trash2, Eye, X, MoreVertical, Layers, ChevronDown, ChevronRight } from 'lucide-react';
 import { supabase, uploadProductImage } from '../lib/supabase';
 import { formatCurrency, generateId, exportToCSV, formatDate } from '../lib/utils';
@@ -634,8 +634,8 @@ export default function Inventory() {
                   gemstone: 'bg-primary-100 text-primary-700',
                 };
                 return (
-                  <>
-                  <tr key={p.id} className="border-b border-neutral-100 hover:bg-neutral-50 transition-colors cursor-pointer" onClick={() => setViewProduct(p)}>
+                  <React.Fragment key={p.id}>
+                  <tr className="border-b border-neutral-100 hover:bg-neutral-50 transition-colors cursor-pointer" onClick={() => setViewProduct(p)}>
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-2.5">
                         {isVariant && (
@@ -737,7 +737,7 @@ export default function Inventory() {
                       <td className="py-2 px-3" />
                     </tr>
                   ))}
-                  </>
+                  </React.Fragment>
                 );
               })}
             </tbody>
