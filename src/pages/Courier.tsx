@@ -159,7 +159,7 @@ export default function Courier({ prefillFromDC }: CourierProps) {
     buildAndOpen();
   }, [prefillFromDC]);
 
-  const loadData = async () => {
+  async function loadData() {
     const [entriesRes, customersRes, soRes] = await Promise.all([
       supabase.from('courier_entries').select('*').order('courier_date', { ascending: false }),
       supabase.from('customers').select('id, name, phone, address, city, state, pincode').eq('is_active', true).order('name'),

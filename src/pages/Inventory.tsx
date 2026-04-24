@@ -65,7 +65,7 @@ export default function Inventory() {
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
 
-  const loadData = async () => {
+  async function loadData() {
     setLoading(true);
     const [productsRes, godownsRes, godownStockRes, unitsRes, variantsRes] = await Promise.all([
       supabase.from('products').select('*').eq('is_active', true).order('name', { ascending: true }),

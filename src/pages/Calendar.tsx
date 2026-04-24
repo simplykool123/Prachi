@@ -53,7 +53,7 @@ export default function CalendarPage() {
 
   useEffect(() => { loadData(); }, [currentDate]);
 
-  const loadData = async () => {
+  async function loadData() {
     const year = currentDate.getFullYear();
     const month = String(currentDate.getMonth() + 1).padStart(2, '0');
     const startDate = `${year}-${month}-01`;
