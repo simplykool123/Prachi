@@ -109,7 +109,7 @@ export default function GodownTransfer() {
       vMap[v.product_id].push(v);
     }
     setVariantsMap(vMap);
-    if (transfersRes.error && 'code' in transfersRes.error && ['PGRST205', 'PGRST200', '42703'].includes(transfersRes.error.code as string)) {
+    if (transfersRes.error && 'code' in transfersRes.error && transfersRes.error.code === 'PGRST205') {
       setTablesMissing(true);
     } else {
       setTablesMissing(false);

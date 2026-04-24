@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Plus, ArrowUpDown, Search, BarChart2, AlertTriangle, ImagePlus, Download, History, Pencil, Trash2, Eye, X, MoreVertical, Layers, ChevronDown, ChevronRight } from 'lucide-react';
 import { supabase, uploadProductImage } from '../lib/supabase';
 import { formatCurrency, generateId, exportToCSV, formatDate } from '../lib/utils';
@@ -46,9 +46,6 @@ export default function Inventory() {
   const [variantsMap, setVariantsMap] = useState<Record<string, ProductVariant[]>>({});
   const [expandedVariantProduct, setExpandedVariantProduct] = useState<string | null>(null);
   const [editingVariants, setEditingVariants] = useState<ProductVariant[]>([]);
-  const [selectedPieceIds, setSelectedPieceIds] = useState<Set<string>>(new Set());
-  const [editingPieceWeights, setEditingPieceWeights] = useState<Record<string, string>>({});
-  const [deletingPieceIds, setDeletingPieceIds] = useState<Set<string>>(new Set());
 
   const [form, setForm] = useState({
     name: '', category: 'Astro Products' as Product['category'], unit: 'pcs',
@@ -108,7 +105,7 @@ export default function Inventory() {
       byVariant[v.product_id].push(v);
     }
     const merged = rawProducts.map(p => {
-      if (p.is_gemstone) {
+      if (p.is_gemstone || p.product_type === 'gemstone') {
         const inStockCount = (byProduct[p.id] || []).filter(u => u.status === 'in_stock').length;
         return { ...p, stock_quantity: inStockCount };
       }
@@ -349,40 +346,8 @@ export default function Inventory() {
 
   const openStockModal = (p: Product) => {
     setSelectedProduct(p);
-    setStockForm({ type: 'in', quantity: '', notes: '', movement_label: 'purchase', godown_id: godowns[0]?.id || '', piece_weights: '' });
-    setSelectedPieceIds(new Set());
-    setEditingPieceWeights({});
-    setDeletingPieceIds(new Set());
+    setStockForm({ type: 'in', quantity: '', notes: '', movement_label: 'in', godown_id: godowns[0]?.id || '', piece_weights: '' });
     setShowStockModal(true);
-  };
-
-  const handleSavePieceEdits = async () => {
-    const updates = Object.entries(editingPieceWeights).filter(([, w]) => w !== '');
-    const deletes = Array.from(deletingPieceIds);
-    try {
-      for (const [id, weightStr] of updates) {
-        if (deletingPieceIds.has(id)) continue;
-        const w = parseFloat(weightStr);
-        if (isNaN(w) || w <= 0) continue;
-        await supabase.from('product_units').update({ weight: w }).eq('id', id);
-      }
-      if (deletes.length > 0) {
-        await supabase.from('product_units').update({ status: 'removed', sold_at: new Date().toISOString(), sold_reference_type: 'manual_delete' }).in('id', deletes);
-        if (selectedProduct) {
-          await processStockMovement({
-            type: 'dispatch',
-            items: [{ product_id: selectedProduct.id, godown_id: stockForm.godown_id, quantity: deletes.length }],
-            reference_type: 'manual_stock_update',
-            notes: 'Piece removed manually',
-          });
-        }
-      }
-      setEditingPieceWeights({});
-      setDeletingPieceIds(new Set());
-      await loadData();
-    } catch (err) {
-      alert('Failed to save piece edits: ' + (err instanceof Error ? err.message : String(err)));
-    }
   };
 
   const openLedgerModal = async (p: Product) => {
@@ -410,7 +375,7 @@ export default function Inventory() {
 
         if (['purchase', 'return'].includes(mvType)) {
           if (parsedWeights.length === 0) {
-            alert(`No valid weights found.\n\nEntered text: "${stockForm.piece_weights}"\n\nPlease enter one number per line (e.g. 1250 or 2.5).`);
+            alert('Please enter one weight per line for gemstone pieces.');
             return;
           }
           const weightUnit: 'kg' | 'g' | 'carat' =
@@ -431,19 +396,16 @@ export default function Inventory() {
             notes: stockForm.notes,
           });
         } else if (mvType === 'sale') {
-          const toSell = selectedPieceIds.size > 0
-            ? Array.from(selectedPieceIds)
-            : (() => {
-                const available = (productUnitsMap[selectedProduct.id] || []).filter(u => u.status === 'in_stock' && (!u.godown_id || u.godown_id === godownId));
-                const n = Math.round(qty);
-                if (n <= 0) { alert('Select at least one piece to sell.'); return null; }
-                if (available.length < n) { alert(`Only ${available.length} piece(s) available.`); return null; }
-                return available.slice(0, n).map(u => u.id);
-              })();
-          if (!toSell || toSell.length === 0) {
-            alert('Select at least one piece to sell.');
+          if (qty <= 0 || !Number.isInteger(qty)) {
+            alert('For gemstone sale, quantity must be whole piece count.');
             return;
           }
+          const available = (productUnitsMap[selectedProduct.id] || []).filter(u => u.status === 'in_stock' && (!u.godown_id || u.godown_id === godownId));
+          if (available.length < qty) {
+            alert(`Only ${available.length} piece(s) available in selected godown.`);
+            return;
+          }
+          const toSell = available.slice(0, qty).map(u => u.id);
           const { error: upErr } = await supabase.from('product_units').update({
             status: 'sold',
             sold_at: new Date().toISOString(),
@@ -452,7 +414,7 @@ export default function Inventory() {
           if (upErr) throw upErr;
           await processStockMovement({
             type: 'dispatch',
-            items: [{ product_id: selectedProduct.id, godown_id: godownId, quantity: toSell.length }],
+            items: [{ product_id: selectedProduct.id, godown_id: godownId, quantity: qty }],
             reference_type: 'manual_stock_update',
             notes: stockForm.notes,
           });
@@ -634,8 +596,8 @@ export default function Inventory() {
                   gemstone: 'bg-primary-100 text-primary-700',
                 };
                 return (
-                  <React.Fragment key={p.id}>
-                  <tr className="border-b border-neutral-100 hover:bg-neutral-50 transition-colors cursor-pointer" onClick={() => setViewProduct(p)}>
+                  <>
+                  <tr key={p.id} className="border-b border-neutral-100 hover:bg-neutral-50 transition-colors cursor-pointer" onClick={() => setViewProduct(p)}>
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-2.5">
                         {isVariant && (
@@ -675,16 +637,6 @@ export default function Inventory() {
                       <div className="flex items-center gap-2">
                         {isVariant ? (
                           <span className="text-xs text-neutral-500">{pVariants.length} variants</span>
-                        ) : p.is_gemstone ? (
-                          <div>
-                            <span className={`text-xs font-semibold ${p.stock_quantity <= 0 ? 'text-error-600' : p.stock_quantity <= p.low_stock_alert ? 'text-warning-600' : 'text-neutral-700'}`}>
-                              {p.stock_quantity} pcs
-                            </span>
-                            {(() => {
-                              const totalGrams = (productUnitsMap[p.id] || []).filter(u => u.status === 'in_stock').reduce((s, u) => s + (Number(u.weight) || 0), 0);
-                              return totalGrams > 0 ? <p className="text-[10px] text-neutral-400">{totalGrams.toFixed(0)}g</p> : null;
-                            })()}
-                          </div>
                         ) : (
                           <>
                             <div className="w-16 h-1.5 bg-neutral-100 rounded-full overflow-hidden">
@@ -737,7 +689,7 @@ export default function Inventory() {
                       <td className="py-2 px-3" />
                     </tr>
                   ))}
-                  </React.Fragment>
+                  </>
                 );
               })}
             </tbody>
@@ -998,24 +950,25 @@ export default function Inventory() {
 
       <Modal
         isOpen={showStockModal && !!selectedProduct}
-        onClose={() => { setShowStockModal(false); setSelectedPieceIds(new Set()); }}
+        onClose={() => setShowStockModal(false)}
         title={selectedProduct?.is_gemstone ? `Piece Stock — ${selectedProduct?.name || ''}` : `Update Stock — ${selectedProduct?.name || ''}`}
         size="sm"
         footer={
           <>
-            <button onClick={() => { setShowStockModal(false); setSelectedPieceIds(new Set()); }} className="btn-secondary">Cancel</button>
+            <button onClick={() => setShowStockModal(false)} className="btn-secondary">Cancel</button>
             <button onClick={handleStockUpdate} className="btn-primary">Update Stock</button>
           </>
         }
       >
-        {selectedProduct && (
         <div className="space-y-3">
-          <div>
-            <label className="label">Godown</label>
-            <select value={stockForm.godown_id} onChange={e => { setStockForm(f => ({ ...f, godown_id: e.target.value })); setSelectedPieceIds(new Set()); }} className="input text-xs">
-              {godowns.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-            </select>
-          </div>
+          {godowns.length > 1 && (
+            <div>
+              <label className="label">Godown</label>
+              <select value={stockForm.godown_id} onChange={e => setStockForm(f => ({ ...f, godown_id: e.target.value }))} className="input text-xs">
+                {godowns.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </select>
+            </div>
+          )}
           <div>
             <label className="label">Movement Type</label>
             <div className="grid grid-cols-2 gap-1.5">
@@ -1023,173 +976,39 @@ export default function Inventory() {
                 { value: 'purchase', label: 'Purchase (In)' },
                 { value: 'sale', label: 'Sale (Out)' },
                 { value: 'return', label: 'Return (In)' },
-                ...(!selectedProduct.is_gemstone ? [{ value: 'adjustment', label: 'Adjustment' }] : []),
+                ...(!selectedProduct?.is_gemstone ? [{ value: 'adjustment', label: 'Adjustment' }] : []),
               ].map(t => (
-                <button key={t.value} onClick={() => { setStockForm(f => ({ ...f, movement_label: t.value, type: ['purchase', 'return'].includes(t.value) ? 'in' : t.value === 'sale' ? 'out' : 'adjustment' })); setSelectedPieceIds(new Set()); }}
+                <button key={t.value} onClick={() => setStockForm(f => ({ ...f, movement_label: t.value, type: ['purchase', 'return'].includes(t.value) ? 'in' : t.value === 'sale' ? 'out' : 'adjustment' }))}
                   className={`py-1.5 px-3 rounded-lg text-xs font-medium transition-colors text-left ${stockForm.movement_label === t.value ? 'bg-primary-600 text-white' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}>
                   {t.label}
                 </button>
               ))}
             </div>
           </div>
-
-          {/* Gemstone: Purchase/Return — enter piece weights */}
-          {selectedProduct.is_gemstone && ['purchase', 'return'].includes(stockForm.movement_label) && (() => {
-            const weightUnit = selectedProduct.weight_unit === 'carats' ? 'carats' : 'grams';
-            const parsed = stockForm.piece_weights.split('\n').map(w => Number(w.trim())).filter(w => Number.isFinite(w) && w > 0);
-            return (
-              <div>
-                <label className="label">
-                  Piece Weights — one per line ({weightUnit})
-                  {parsed.length > 0 && <span className="ml-1 text-primary-600 font-semibold">{parsed.length} piece{parsed.length > 1 ? 's' : ''} ready</span>}
-                </label>
-                <textarea
-                  value={stockForm.piece_weights}
-                  onChange={e => setStockForm(f => ({ ...f, piece_weights: e.target.value }))}
-                  className="input h-28 text-xs resize-none font-mono"
-                  placeholder={`Enter weights, one per line\ne.g.:\n1250\n975\n2448`}
-                  autoFocus
-                />
-                <p className="text-[10px] text-neutral-400 mt-0.5">
-                  {parsed.length > 0
-                    ? `${parsed.length} piece(s) will be added — total ${parsed.reduce((s, w) => s + w, 0).toFixed(2)} ${weightUnit}`
-                    : 'Each line = one piece. Type a weight and press Enter for each piece.'}
-                </p>
-              </div>
-            );
-          })()}
-
-          {/* Gemstone: Sale — pick specific pieces from dropdown */}
-          {selectedProduct.is_gemstone && stockForm.movement_label === 'sale' && (() => {
-            const availablePieces = (productUnitsMap[selectedProduct.id] || []).filter(u => u.status === 'in_stock' && (!u.godown_id || u.godown_id === stockForm.godown_id));
-            return (
-              <div>
-                <label className="label">
-                  Select Pieces to Sell
-                  {availablePieces.length > 0 && (
-                    <span className="text-neutral-400 font-normal ml-1">({selectedPieceIds.size} of {availablePieces.length} selected)</span>
-                  )}
-                </label>
-                {availablePieces.length === 0 ? (
-                  <div className="bg-error-50 border border-error-100 rounded-lg px-3 py-2.5 text-xs text-error-700">No pieces available in this godown.</div>
-                ) : (
-                  <div className="border border-neutral-200 rounded-lg overflow-hidden max-h-48 overflow-y-auto">
-                    {availablePieces.map((u, idx) => {
-                      const checked = selectedPieceIds.has(u.id);
-                      return (
-                        <label key={u.id} className={`flex items-center gap-2.5 px-3 py-2 cursor-pointer transition-colors border-b border-neutral-50 last:border-0 ${checked ? 'bg-primary-50' : 'hover:bg-neutral-50'}`}>
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => {
-                              setSelectedPieceIds(prev => {
-                                const next = new Set(prev);
-                                if (next.has(u.id)) next.delete(u.id);
-                                else next.add(u.id);
-                                return next;
-                              });
-                            }}
-                            className="w-3.5 h-3.5 accent-primary-600 shrink-0"
-                          />
-                          <span className="text-xs font-medium text-neutral-700 flex-1">Piece #{idx + 1}</span>
-                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${checked ? 'bg-primary-100 text-primary-700' : 'bg-neutral-100 text-neutral-600'}`}>
-                            {u.weight} {u.weight_unit}
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                )}
-                {availablePieces.length > 0 && (
-                  <div className="flex gap-2 mt-1.5">
-                    <button type="button" onClick={() => setSelectedPieceIds(new Set(availablePieces.map(u => u.id)))} className="text-[10px] text-primary-600 hover:underline">Select all</button>
-                    <span className="text-[10px] text-neutral-300">|</span>
-                    <button type="button" onClick={() => setSelectedPieceIds(new Set())} className="text-[10px] text-neutral-500 hover:underline">Clear</button>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* Non-gemstone or gemstone adjustment — enter quantity */}
-          {(!selectedProduct.is_gemstone || (!['purchase', 'return', 'sale'].includes(stockForm.movement_label))) && (
+          {selectedProduct?.is_gemstone && ['purchase', 'return'].includes(stockForm.movement_label) ? (
+            <div>
+              <label className="label">
+                Piece Weights — one per line ({selectedProduct.weight_unit === 'carats' ? 'carats' : 'grams'})
+              </label>
+              <textarea value={stockForm.piece_weights} onChange={e => setStockForm(f => ({ ...f, piece_weights: e.target.value }))} className="input h-28 text-xs resize-none font-mono" placeholder={'2.3\n4.1\n1.8'} />
+              <p className="text-[10px] text-neutral-400 mt-0.5">Each line = one piece. 3 lines = 3 pieces added to stock.</p>
+            </div>
+          ) : (
             <div>
               <label className="label">Quantity</label>
-              <input type="number" step="1" min={0} value={stockForm.quantity} onChange={e => setStockForm(f => ({ ...f, quantity: e.target.value }))} className="input" placeholder="0" />
+              <input type="number" step={selectedProduct?.is_gemstone ? '1' : '1'} min={0} value={stockForm.quantity} onChange={e => setStockForm(f => ({ ...f, quantity: e.target.value }))} className="input" placeholder="0" />
             </div>
           )}
-
           <div>
             <label className="label">Notes / Reference</label>
             <input value={stockForm.notes} onChange={e => setStockForm(f => ({ ...f, notes: e.target.value }))} className="input" placeholder="Invoice #, supplier name, reason..." />
           </div>
-
-          {/* Edit existing in-stock pieces */}
-          {selectedProduct.is_gemstone && (() => {
-            const allPieces = (productUnitsMap[selectedProduct.id] || []).filter(u => u.status === 'in_stock');
-            if (allPieces.length === 0) return null;
-            const hasEdits = Object.keys(editingPieceWeights).some(id => editingPieceWeights[id] !== '') || deletingPieceIds.size > 0;
-            return (
-              <div className="border border-neutral-200 rounded-lg overflow-hidden">
-                <div className="flex items-center justify-between bg-neutral-50 px-3 py-2 border-b border-neutral-100">
-                  <p className="text-xs font-semibold text-neutral-700">Edit In-Stock Pieces ({allPieces.length})</p>
-                  {hasEdits && (
-                    <button type="button" onClick={handleSavePieceEdits} className="text-[10px] font-semibold text-primary-600 hover:underline">Save edits</button>
-                  )}
-                </div>
-                <div className="max-h-44 overflow-y-auto divide-y divide-neutral-50">
-                  {allPieces.map((u, idx) => {
-                    const isDeleting = deletingPieceIds.has(u.id);
-                    const editedWeight = editingPieceWeights[u.id];
-                    return (
-                      <div key={u.id} className={`flex items-center gap-2 px-3 py-1.5 transition-colors ${isDeleting ? 'bg-error-50 opacity-60' : 'hover:bg-neutral-50'}`}>
-                        <span className="text-[10px] text-neutral-400 w-6 shrink-0">#{idx + 1}</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          disabled={isDeleting}
-                          value={editedWeight !== undefined ? editedWeight : String(u.weight)}
-                          onChange={e => setEditingPieceWeights(prev => ({ ...prev, [u.id]: e.target.value }))}
-                          className="input text-xs py-1 flex-1 min-w-0"
-                        />
-                        <span className="text-[10px] text-neutral-400 shrink-0">{u.weight_unit}</span>
-                        <button
-                          type="button"
-                          onClick={() => setDeletingPieceIds(prev => {
-                            const next = new Set(prev);
-                            if (next.has(u.id)) next.delete(u.id); else next.add(u.id);
-                            return next;
-                          })}
-                          className={`text-[10px] px-1.5 py-0.5 rounded transition-colors shrink-0 ${isDeleting ? 'text-error-600 bg-error-100 hover:bg-error-200' : 'text-neutral-400 hover:text-error-600'}`}
-                          title={isDeleting ? 'Undo remove' : 'Mark for removal'}
-                        >
-                          {isDeleting ? 'Undo' : 'Del'}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-                {hasEdits && (
-                  <div className="px-3 py-2 bg-primary-50 border-t border-primary-100 text-[10px] text-primary-700">
-                    {deletingPieceIds.size > 0 && <span>{deletingPieceIds.size} piece(s) marked for removal. </span>}
-                    Click "Save edits" to apply changes.
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-
-          <div className="bg-neutral-50 px-3 py-2 rounded-lg">
-            <p className="text-xs text-neutral-500">
-              Total stock: <strong>{selectedProduct.stock_quantity} {selectedProduct.is_gemstone ? 'pcs' : selectedProduct.unit}</strong>
-              {selectedProduct.is_gemstone && (() => {
-                const totalG = (productUnitsMap[selectedProduct.id] || []).filter(u => u.status === 'in_stock').reduce((s, u) => s + (Number(u.weight) || 0), 0);
-                return totalG > 0 ? <span className="text-neutral-400 ml-1">· {totalG.toFixed(0)}g total</span> : null;
-              })()}
-            </p>
-          </div>
+          {selectedProduct && (
+            <div className="bg-neutral-50 px-3 py-2 rounded-lg">
+              <p className="text-xs text-neutral-500">Total stock: <strong>{selectedProduct.stock_quantity} {selectedProduct.unit}</strong></p>
+            </div>
+          )}
         </div>
-        )}
       </Modal>
 
       <Modal
@@ -1257,17 +1076,14 @@ export default function Inventory() {
       </Modal>
 
       {/* Product Detail View */}
-      {viewProduct && (() => {
-        const liveProduct = products.find(p => p.id === viewProduct.id) || viewProduct;
-        const inStockPieces = (productUnitsMap[liveProduct.id] || []).filter(u => u.status === 'in_stock');
-        return (
+      {viewProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setViewProduct(null)} />
           <div className="relative bg-white rounded-xl shadow-card-lg w-full max-w-lg overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-100">
-              <p className="text-sm font-semibold text-neutral-900">{liveProduct.name}</p>
+              <p className="text-sm font-semibold text-neutral-900">{viewProduct.name}</p>
               <div className="flex items-center gap-2">
-                <button onClick={() => { setViewProduct(null); openEdit(liveProduct); }} className="btn-secondary text-xs">
+                <button onClick={() => { setViewProduct(null); openEdit(viewProduct); }} className="btn-secondary text-xs">
                   <Pencil className="w-3 h-3" /> Edit
                 </button>
                 <button onClick={() => setViewProduct(null)} className="w-6 h-6 flex items-center justify-center rounded-lg hover:bg-neutral-100">
@@ -1276,9 +1092,10 @@ export default function Inventory() {
               </div>
             </div>
             <div className="p-5 space-y-4">
+              {/* Image */}
               <div className="flex gap-4 items-start">
-                {liveProduct.image_url ? (
-                  <img src={liveProduct.image_url} alt={liveProduct.name} className="w-28 h-28 rounded-xl object-cover border border-neutral-100 shrink-0" />
+                {viewProduct.image_url ? (
+                  <img src={viewProduct.image_url} alt={viewProduct.name} className="w-28 h-28 rounded-xl object-cover border border-neutral-100 shrink-0" />
                 ) : (
                   <div className="w-28 h-28 rounded-xl bg-neutral-100 flex items-center justify-center shrink-0">
                     <ImagePlus className="w-8 h-8 text-neutral-300" />
@@ -1286,63 +1103,63 @@ export default function Inventory() {
                 )}
                 <div className="flex-1 space-y-1.5">
                   <div className="flex items-center gap-2">
-                    <span className={`badge text-[10px] font-semibold uppercase tracking-wider ${liveProduct.category === 'Astro Products' ? 'bg-primary-50 text-primary-700' : liveProduct.category === 'Vastu Items' ? 'bg-accent-50 text-accent-700' : 'bg-blue-50 text-blue-700'}`}>{liveProduct.category}</span>
+                    <span className={`badge text-[10px] font-semibold uppercase tracking-wider ${viewProduct.category === 'Astro Products' ? 'bg-primary-50 text-primary-700' : viewProduct.category === 'Vastu Items' ? 'bg-accent-50 text-accent-700' : 'bg-blue-50 text-blue-700'}`}>{viewProduct.category}</span>
                   </div>
-                  <p className="text-sm font-bold text-neutral-900">{liveProduct.name}</p>
-                  {liveProduct.description && <p className="text-xs text-neutral-500">{liveProduct.description}</p>}
-                  <p className="text-[10px] text-neutral-400 font-mono">{liveProduct.sku}</p>
+                  <p className="text-sm font-bold text-neutral-900">{viewProduct.name}</p>
+                  {viewProduct.description && <p className="text-xs text-neutral-500">{viewProduct.description}</p>}
+                  <p className="text-[10px] text-neutral-400 font-mono">{viewProduct.sku}</p>
                 </div>
               </div>
+              {/* Details grid */}
               <div className="grid grid-cols-3 gap-3">
                 <div className="bg-neutral-50 rounded-lg p-3">
                   <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mb-1">Sell Price</p>
-                  <p className="text-sm font-bold text-primary-700">{formatCurrency(liveProduct.selling_price)}</p>
+                  <p className="text-sm font-bold text-primary-700">{formatCurrency(viewProduct.selling_price)}</p>
                 </div>
                 {isAdmin && (
                   <div className="bg-neutral-50 rounded-lg p-3">
                     <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mb-1">Buy Price</p>
-                    <p className="text-sm font-bold text-neutral-700">{formatCurrency(liveProduct.purchase_price)}</p>
+                    <p className="text-sm font-bold text-neutral-700">{formatCurrency(viewProduct.purchase_price)}</p>
                   </div>
                 )}
-                <div className={`rounded-lg p-3 ${liveProduct.stock_quantity <= 0 ? 'bg-error-50' : liveProduct.stock_quantity <= liveProduct.low_stock_alert ? 'bg-warning-50' : 'bg-success-50'}`}>
+                <div className={`rounded-lg p-3 ${viewProduct.stock_quantity <= 0 ? 'bg-error-50' : viewProduct.stock_quantity <= viewProduct.low_stock_alert ? 'bg-warning-50' : 'bg-success-50'}`}>
                   <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mb-1">In Stock</p>
-                  <p className={`text-sm font-bold ${liveProduct.stock_quantity <= 0 ? 'text-error-700' : liveProduct.stock_quantity <= liveProduct.low_stock_alert ? 'text-warning-700' : 'text-success-700'}`}>
-                    {liveProduct.stock_quantity} {liveProduct.is_gemstone ? 'pcs' : liveProduct.unit}
+                  <p className={`text-sm font-bold ${viewProduct.stock_quantity <= 0 ? 'text-error-700' : viewProduct.stock_quantity <= viewProduct.low_stock_alert ? 'text-warning-700' : 'text-success-700'}`}>
+                    {viewProduct.stock_quantity} {viewProduct.unit}
                   </p>
                 </div>
                 <div className="bg-neutral-50 rounded-lg p-3">
                   <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mb-1">Unit</p>
-                  <p className="text-xs font-semibold text-neutral-700">{liveProduct.is_gemstone ? 'pcs (piece-tracked)' : liveProduct.unit}</p>
+                  <p className="text-xs font-semibold text-neutral-700">{viewProduct.unit}</p>
                 </div>
                 <div className="bg-neutral-50 rounded-lg p-3">
                   <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mb-1">Low Stock Alert</p>
-                  <p className="text-xs font-semibold text-neutral-700">{liveProduct.low_stock_alert}</p>
+                  <p className="text-xs font-semibold text-neutral-700">{viewProduct.low_stock_alert}</p>
                 </div>
-                <div className={`rounded-lg p-3 ${liveProduct.is_active ? 'bg-success-50' : 'bg-neutral-100'}`}>
+              <div className={`rounded-lg p-3 ${viewProduct.is_active ? 'bg-success-50' : 'bg-neutral-100'}`}>
                   <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mb-1">Status</p>
-                  <p className={`text-xs font-bold ${liveProduct.is_active ? 'text-success-700' : 'text-neutral-500'}`}>{liveProduct.is_active ? 'Active' : 'Inactive'}</p>
+                  <p className={`text-xs font-bold ${viewProduct.is_active ? 'text-success-700' : 'text-neutral-500'}`}>{viewProduct.is_active ? 'Active' : 'Inactive'}</p>
                 </div>
               </div>
+              {/* Quick actions */}
               <div className="flex gap-2 pt-1">
-                <button onClick={() => { setViewProduct(null); openStockModal(liveProduct); }} className="btn-secondary text-xs flex-1 justify-center">
-                  <ArrowUpDown className="w-3 h-3" /> {liveProduct.is_gemstone ? 'Add / Remove Pieces' : 'Stock In/Out'}
+                <button onClick={() => { setViewProduct(null); openStockModal(viewProduct); }} className="btn-secondary text-xs flex-1 justify-center">
+                  <ArrowUpDown className="w-3 h-3" /> {viewProduct.is_gemstone ? 'Add / Remove Pieces' : 'Stock In/Out'}
                 </button>
-                <button onClick={() => { setViewProduct(null); openLedgerModal(liveProduct); }} className="btn-secondary text-xs flex-1 justify-center">
+                <button onClick={() => { setViewProduct(null); openLedgerModal(viewProduct); }} className="btn-secondary text-xs flex-1 justify-center">
                   <History className="w-3 h-3" /> View Movements
                 </button>
               </div>
-              {liveProduct.is_gemstone && (
-                <div className="bg-neutral-50 rounded-lg p-3">
-                  <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mb-2">
-                    Available Pieces ({inStockPieces.length})
-                  </p>
+              {viewProduct.is_gemstone && (
+                <div className="col-span-3 bg-neutral-50 rounded-lg p-3">
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mb-1">Available Pieces</p>
                   <div className="flex flex-wrap gap-1.5">
-                    {inStockPieces.map(u => (
+                    {(productUnitsMap[viewProduct.id] || []).filter(u => u.status === 'in_stock').map(u => (
                       <span key={u.id} className="px-2 py-0.5 rounded-full bg-primary-50 text-primary-700 text-[10px] font-semibold">
                         {u.weight} {u.weight_unit}
                       </span>
                     ))}
-                    {inStockPieces.length === 0 && (
+                    {(productUnitsMap[viewProduct.id] || []).filter(u => u.status === 'in_stock').length === 0 && (
                       <span className="text-xs text-neutral-400">No in-stock pieces</span>
                     )}
                   </div>
@@ -1351,8 +1168,7 @@ export default function Inventory() {
             </div>
           </div>
         </div>
-        );
-      })()}
+      )}
 
       {/* Rich Delete Modal */}
       {confirmProduct && (
