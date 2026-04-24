@@ -1063,7 +1063,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
         )}
       </Modal>
 
-      <Modal isOpen={showEditModal} onClose={() => setShowEditModal(false)} title="Edit Invoice" size="2xl"
+      <Modal isOpen={showEditModal} onClose={() => setShowEditModal(false)} title="Edit Invoice" size="2xl" maxWidth="max-w-7xl"
         footer={
           <>
             <button onClick={() => setShowEditModal(false)} className="btn-secondary">Cancel</button>
@@ -1175,7 +1175,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
         </div>
       </Modal>
 
-      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="New Invoice" size="2xl"
+      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="New Invoice" size="2xl" maxWidth="max-w-7xl"
         footer={
           <>
             <button onClick={() => setShowModal(false)} className="btn-secondary">Cancel</button>

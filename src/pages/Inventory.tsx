@@ -45,7 +45,7 @@ export default function Inventory() {
 
   const [variantsMap, setVariantsMap] = useState<Record<string, ProductVariant[]>>({});
   const [expandedVariantProduct, setExpandedVariantProduct] = useState<string | null>(null);
-  const [editingVariants, setEditingVariants] = useState<ProductVariant[]>([]);
+  const [editingVariants, setEditingVariants] = useState<(ProductVariant & { godown_id?: string })[]>([]);
 
   const [form, setForm] = useState({
     name: '', category: 'Astro Products' as Product['category'], unit: 'pcs',
@@ -162,7 +162,14 @@ export default function Inventory() {
     const pType: ProductType = (p.product_type as ProductType) || (p.is_gemstone ? 'gemstone' : 'simple');
     if (pType === 'variant') {
       const { data: vRows } = await supabase.from('product_variants').select('*').eq('product_id', p.id).eq('is_active', true).order('name');
-      setEditingVariants((vRows || []) as ProductVariant[]);
+      const { data: vStock } = await supabase.from('godown_stock').select('variant_id, godown_id, quantity').eq('product_id', p.id);
+      const byVariant: Record<string, { godown_id: string; quantity: number }> = {};
+      for (const s of (vStock || [])) {
+        if (!s.variant_id) continue;
+        const prev = byVariant[s.variant_id];
+        if (!prev || (s.quantity || 0) > prev.quantity) byVariant[s.variant_id] = { godown_id: s.godown_id, quantity: s.quantity || 0 };
+      }
+      setEditingVariants(((vRows || []) as ProductVariant[]).map(v => ({ ...v, godown_id: byVariant[v.id]?.godown_id || (godowns[0]?.id || '') })));
     } else {
       setEditingVariants([]);
     }
@@ -224,6 +231,7 @@ export default function Inventory() {
         // Save variants (upsert by id)
         if (form.product_type === 'variant') {
           for (const v of editingVariants) {
+            let variantId = v.id;
             if (v.id && !v.id.startsWith('new-')) {
               await supabase.from('product_variants').update({
                 name: v.name, sku: v.sku,
@@ -231,11 +239,20 @@ export default function Inventory() {
                 stock_quantity: v.stock_quantity, updated_at: new Date().toISOString(),
               }).eq('id', v.id);
             } else {
-              await supabase.from('product_variants').insert({
+              const { data: ins } = await supabase.from('product_variants').insert({
                 product_id: editing.id, name: v.name, sku: v.sku || generateId('VAR'),
                 purchase_price: v.purchase_price, selling_price: v.selling_price,
                 stock_quantity: v.stock_quantity,
-              });
+              }).select('id').maybeSingle();
+              if (ins?.id) variantId = ins.id;
+            }
+            if (v.godown_id && variantId) {
+              await supabase.from('godown_stock').delete().eq('product_id', editing.id).eq('variant_id', variantId);
+              if ((v.stock_quantity || 0) > 0) {
+                await supabase.from('godown_stock').insert({
+                  product_id: editing.id, variant_id: variantId, godown_id: v.godown_id, quantity: v.stock_quantity,
+                });
+              }
             }
           }
         }
@@ -267,13 +284,20 @@ export default function Inventory() {
         if (newProduct) {
           // Save new variants
           if (form.product_type === 'variant' && editingVariants.length > 0) {
-            await supabase.from('product_variants').insert(
+            const { data: insertedVariants } = await supabase.from('product_variants').insert(
               editingVariants.map(v => ({
                 product_id: newProduct.id, name: v.name, sku: v.sku || generateId('VAR'),
                 purchase_price: v.purchase_price, selling_price: v.selling_price,
                 stock_quantity: v.stock_quantity,
               }))
-            );
+            ).select('id, sku');
+            const stockRows: Array<{ product_id: string; variant_id: string; godown_id: string; quantity: number }> = [];
+            for (const v of editingVariants) {
+              if (!v.godown_id || !v.stock_quantity) continue;
+              const match = (insertedVariants || []).find(r => r.sku === (v.sku || ''));
+              if (match) stockRows.push({ product_id: newProduct.id, variant_id: match.id, godown_id: v.godown_id, quantity: v.stock_quantity });
+            }
+            if (stockRows.length) await supabase.from('godown_stock').insert(stockRows);
           }
           if (form.product_type !== 'variant') {
             const openingItems = Object.entries(openingStocks)
@@ -797,12 +821,26 @@ export default function Inventory() {
                 <option>Healing Items</option>
               </select>
             </div>
-            <div>
-              <label className="label">Unit</label>
-              <select value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} className="input text-xs">
-                {UNITS.map(u => <option key={u}>{u}</option>)}
-              </select>
-            </div>
+            {form.product_type === 'weight' || form.product_type === 'gemstone' ? (
+              <div>
+                <label className="label">{form.product_type === 'weight' ? 'Weight Unit' : 'Piece Weight Unit'}</label>
+                <select value={form.weight_unit} onChange={e => {
+                  const wu = e.target.value as 'grams' | 'carats' | 'kg';
+                  setForm(f => ({ ...f, weight_unit: wu, unit: form.product_type === 'weight' ? (wu === 'kg' ? 'kg' : wu === 'carats' ? 'carats' : 'grams') : 'pcs' }));
+                }} className="input text-xs">
+                  <option value="grams">Grams (g)</option>
+                  <option value="kg">Kilograms (kg)</option>
+                  <option value="carats">Carats (ct)</option>
+                </select>
+              </div>
+            ) : (
+              <div>
+                <label className="label">Unit</label>
+                <select value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} className="input text-xs">
+                  {UNITS.map(u => <option key={u}>{u}</option>)}
+                </select>
+              </div>
+            )}
             <div>
               <label className="label">Vastu Direction</label>
               <input value={form.direction} onChange={e => setForm(f => ({ ...f, direction: e.target.value }))} className="input text-xs" placeholder="N, S, NE..." />
@@ -820,7 +858,12 @@ export default function Inventory() {
                 { value: 'gemstone', label: 'Gemstone', desc: 'Piece tracking' },
               ] as { value: ProductType; label: string; desc: string }[]).map(t => (
                 <button key={t.value} type="button"
-                  onClick={() => setForm(f => ({ ...f, product_type: t.value, is_gemstone: t.value === 'gemstone' }))}
+                  onClick={() => setForm(f => {
+                    let unit = f.unit;
+                    if (t.value === 'gemstone') unit = 'pcs';
+                    else if (t.value === 'weight') unit = f.weight_unit === 'kg' ? 'kg' : f.weight_unit === 'carats' ? 'carats' : 'grams';
+                    return { ...f, product_type: t.value, is_gemstone: t.value === 'gemstone', unit };
+                  })}
                   className={`px-2 py-2 rounded-lg border text-left transition-colors ${form.product_type === t.value ? 'border-primary-500 bg-primary-50' : 'border-neutral-200 hover:border-neutral-300'}`}>
                   <p className={`text-xs font-semibold ${form.product_type === t.value ? 'text-primary-700' : 'text-neutral-700'}`}>{t.label}</p>
                   <p className="text-[10px] text-neutral-400">{t.desc}</p>
@@ -845,23 +888,10 @@ export default function Inventory() {
             )}
           </div>
 
-          {/* Weight unit — for gemstone and weight types */}
-          {(form.product_type === 'gemstone' || form.product_type === 'weight') && (
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="label">Weight Unit</label>
-                <select value={form.weight_unit} onChange={e => setForm(f => ({ ...f, weight_unit: e.target.value as 'grams' | 'carats' | 'kg' }))} className="input text-xs">
-                  <option value="grams">Grams (g)</option>
-                  <option value="kg">Kilograms (kg)</option>
-                  <option value="carats">Carats (ct)</option>
-                </select>
-              </div>
-              {form.product_type === 'weight' && (
-                <div>
-                  <label className="label">Total Stock (weight)</label>
-                  <input type="number" value={form.total_weight} onChange={e => setForm(f => ({ ...f, total_weight: e.target.value }))} className="input text-xs" placeholder="0" />
-                </div>
-              )}
+          {form.product_type === 'weight' && (
+            <div>
+              <label className="label">Total Stock ({form.weight_unit === 'carats' ? 'ct' : form.weight_unit === 'kg' ? 'kg' : 'g'})</label>
+              <input type="number" value={form.total_weight} onChange={e => setForm(f => ({ ...f, total_weight: e.target.value }))} className="input text-xs" placeholder="0" />
             </div>
           )}
 
@@ -886,11 +916,17 @@ export default function Inventory() {
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="label mb-0">Variants</label>
-                <button type="button" onClick={() => setEditingVariants(v => [...v, {
-                  id: `new-${Date.now()}`, product_id: editing?.id || '',
-                  name: '', sku: generateId('VAR'), stock_quantity: 0,
-                  purchase_price: 0, selling_price: 0, is_active: true,
-                }])} className="btn-ghost text-xs py-1">
+                <button type="button" onClick={() => setEditingVariants(v => {
+                  const nextIdx = v.length + 1;
+                  const baseSku = form.sku?.trim();
+                  const autoSku = baseSku ? `${baseSku}-${nextIdx}` : generateId('VAR');
+                  return [...v, {
+                    id: `new-${Date.now()}`, product_id: editing?.id || '',
+                    name: '', sku: autoSku, stock_quantity: 0,
+                    purchase_price: 0, selling_price: 0, is_active: true,
+                    godown_id: godowns[0]?.id || '',
+                  }];
+                })} className="btn-ghost text-xs py-1">
                   <Plus className="w-3 h-3" /> Add Variant
                 </button>
               </div>
@@ -903,6 +939,7 @@ export default function Inventory() {
                       {isAdmin && <th className="table-header text-right w-24">Buy (₹)</th>}
                       <th className="table-header text-right w-24">Sell (₹)</th>
                       <th className="table-header text-right w-20">Stock</th>
+                      <th className="table-header text-left w-36">Warehouse</th>
                       <th className="table-header w-8" />
                     </tr>
                   </thead>
@@ -914,11 +951,17 @@ export default function Inventory() {
                         {isAdmin && <td className="px-2 py-1.5"><input type="number" value={v.purchase_price} onChange={e => setEditingVariants(vs => { const n=[...vs]; n[vi]={...n[vi],purchase_price:parseFloat(e.target.value)||0}; return n; })} className="input text-xs py-1 text-right" /></td>}
                         <td className="px-2 py-1.5"><input type="number" value={v.selling_price} onChange={e => setEditingVariants(vs => { const n=[...vs]; n[vi]={...n[vi],selling_price:parseFloat(e.target.value)||0}; return n; })} className="input text-xs py-1 text-right" /></td>
                         <td className="px-2 py-1.5"><input type="number" value={v.stock_quantity} onChange={e => setEditingVariants(vs => { const n=[...vs]; n[vi]={...n[vi],stock_quantity:parseFloat(e.target.value)||0}; return n; })} className="input text-xs py-1 text-right" /></td>
+                        <td className="px-2 py-1.5">
+                          <select value={v.godown_id || ''} onChange={e => setEditingVariants(vs => { const n=[...vs]; n[vi]={...n[vi],godown_id:e.target.value}; return n; })} className="input text-xs py-1">
+                            {godowns.length === 0 && <option value="">(no godowns)</option>}
+                            {godowns.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                          </select>
+                        </td>
                         <td className="px-2 py-1.5"><button onClick={() => setEditingVariants(vs => vs.filter((_,i)=>i!==vi))} className="text-neutral-400 hover:text-error-500"><X className="w-3.5 h-3.5" /></button></td>
                       </tr>
                     ))}
                     {editingVariants.length === 0 && (
-                      <tr><td colSpan={6} className="px-3 py-4 text-center text-xs text-neutral-400">No variants yet. Click "Add Variant" to create one.</td></tr>
+                      <tr><td colSpan={isAdmin ? 7 : 6} className="px-3 py-4 text-center text-xs text-neutral-400">No variants yet. Click "Add Variant" to create one.</td></tr>
                     )}
                   </tbody>
                 </table>
