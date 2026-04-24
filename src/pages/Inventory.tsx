@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Plus, ArrowUpDown, Search, BarChart2, AlertTriangle, ImagePlus, Download, History, Pencil, Trash2, Eye, X, MoreVertical, Layers, ChevronDown, ChevronRight } from 'lucide-react';
 import { supabase, uploadProductImage } from '../lib/supabase';
 import { formatCurrency, generateId, exportToCSV, formatDate } from '../lib/utils';
@@ -58,6 +58,7 @@ export default function Inventory() {
     company_id: '',
   });
   const [stockForm, setStockForm] = useState({ type: 'adjustment', quantity: '', notes: '', movement_label: 'adjustment', godown_id: '', piece_weights: '' });
+  const [selectedPieceIds, setSelectedPieceIds] = useState<Set<string>>(new Set());
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
 
@@ -346,7 +347,8 @@ export default function Inventory() {
 
   const openStockModal = (p: Product) => {
     setSelectedProduct(p);
-    setStockForm({ type: 'in', quantity: '', notes: '', movement_label: 'in', godown_id: godowns[0]?.id || '', piece_weights: '' });
+    setStockForm({ type: 'in', quantity: '', notes: '', movement_label: 'purchase', godown_id: godowns[0]?.id || '', piece_weights: '' });
+    setSelectedPieceIds(new Set());
     setShowStockModal(true);
   };
 
@@ -396,16 +398,11 @@ export default function Inventory() {
             notes: stockForm.notes,
           });
         } else if (mvType === 'sale') {
-          if (qty <= 0 || !Number.isInteger(qty)) {
-            alert('For gemstone sale, quantity must be whole piece count.');
+          const toSell = Array.from(selectedPieceIds);
+          if (toSell.length === 0) {
+            alert('Select at least one piece to mark as sold.');
             return;
           }
-          const available = (productUnitsMap[selectedProduct.id] || []).filter(u => u.status === 'in_stock' && (!u.godown_id || u.godown_id === godownId));
-          if (available.length < qty) {
-            alert(`Only ${available.length} piece(s) available in selected godown.`);
-            return;
-          }
-          const toSell = available.slice(0, qty).map(u => u.id);
           const { error: upErr } = await supabase.from('product_units').update({
             status: 'sold',
             sold_at: new Date().toISOString(),
@@ -414,7 +411,7 @@ export default function Inventory() {
           if (upErr) throw upErr;
           await processStockMovement({
             type: 'dispatch',
-            items: [{ product_id: selectedProduct.id, godown_id: godownId, quantity: qty }],
+            items: [{ product_id: selectedProduct.id, godown_id: godownId, quantity: toSell.length }],
             reference_type: 'manual_stock_update',
             notes: stockForm.notes,
           });
@@ -596,8 +593,8 @@ export default function Inventory() {
                   gemstone: 'bg-primary-100 text-primary-700',
                 };
                 return (
-                  <>
-                  <tr key={p.id} className="border-b border-neutral-100 hover:bg-neutral-50 transition-colors cursor-pointer" onClick={() => setViewProduct(p)}>
+                  <React.Fragment key={p.id}>
+                  <tr className="border-b border-neutral-100 hover:bg-neutral-50 transition-colors cursor-pointer" onClick={() => setViewProduct(p)}>
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-2.5">
                         {isVariant && (
@@ -689,7 +686,7 @@ export default function Inventory() {
                       <td className="py-2 px-3" />
                     </tr>
                   ))}
-                  </>
+                  </React.Fragment>
                 );
               })}
             </tbody>
@@ -961,10 +958,10 @@ export default function Inventory() {
         }
       >
         <div className="space-y-3">
-          {godowns.length > 1 && (
+          {godowns.length > 0 && (
             <div>
               <label className="label">Godown</label>
-              <select value={stockForm.godown_id} onChange={e => setStockForm(f => ({ ...f, godown_id: e.target.value }))} className="input text-xs">
+              <select value={stockForm.godown_id} onChange={e => { setStockForm(f => ({ ...f, godown_id: e.target.value })); setSelectedPieceIds(new Set()); }} className="input text-xs">
                 {godowns.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
               </select>
             </div>
@@ -978,25 +975,81 @@ export default function Inventory() {
                 { value: 'return', label: 'Return (In)' },
                 ...(!selectedProduct?.is_gemstone ? [{ value: 'adjustment', label: 'Adjustment' }] : []),
               ].map(t => (
-                <button key={t.value} onClick={() => setStockForm(f => ({ ...f, movement_label: t.value, type: ['purchase', 'return'].includes(t.value) ? 'in' : t.value === 'sale' ? 'out' : 'adjustment' }))}
+                <button key={t.value} onClick={() => { setStockForm(f => ({ ...f, movement_label: t.value, type: ['purchase', 'return'].includes(t.value) ? 'in' : t.value === 'sale' ? 'out' : 'adjustment' })); setSelectedPieceIds(new Set()); }}
                   className={`py-1.5 px-3 rounded-lg text-xs font-medium transition-colors text-left ${stockForm.movement_label === t.value ? 'bg-primary-600 text-white' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}>
                   {t.label}
                 </button>
               ))}
             </div>
           </div>
-          {selectedProduct?.is_gemstone && ['purchase', 'return'].includes(stockForm.movement_label) ? (
-            <div>
-              <label className="label">
-                Piece Weights — one per line ({selectedProduct.weight_unit === 'carats' ? 'carats' : 'grams'})
-              </label>
-              <textarea value={stockForm.piece_weights} onChange={e => setStockForm(f => ({ ...f, piece_weights: e.target.value }))} className="input h-28 text-xs resize-none font-mono" placeholder={'2.3\n4.1\n1.8'} />
-              <p className="text-[10px] text-neutral-400 mt-0.5">Each line = one piece. 3 lines = 3 pieces added to stock.</p>
-            </div>
-          ) : (
+          {selectedProduct?.is_gemstone ? (() => {
+            const wLabel = selectedProduct.weight_unit === 'carats' ? 'ct' : 'g';
+            const availablePieces = (productUnitsMap[selectedProduct.id] || []).filter(u =>
+              u.status === 'in_stock' && (!stockForm.godown_id || !u.godown_id || u.godown_id === stockForm.godown_id)
+            );
+            if (stockForm.movement_label === 'sale') {
+              const selTotal = Array.from(selectedPieceIds).reduce((s, id) => {
+                const p = availablePieces.find(u => u.id === id);
+                return s + (p?.weight || 0);
+              }, 0);
+              return (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="label mb-0">Select Pieces to Sell</label>
+                    <div className="flex gap-1.5">
+                      <button type="button" onClick={() => setSelectedPieceIds(new Set(availablePieces.map(u => u.id)))} className="text-[10px] text-primary-600 hover:underline">All</button>
+                      <span className="text-neutral-300 text-[10px]">|</span>
+                      <button type="button" onClick={() => setSelectedPieceIds(new Set())} className="text-[10px] text-neutral-500 hover:underline">None</button>
+                    </div>
+                  </div>
+                  {availablePieces.length === 0 ? (
+                    <p className="text-xs text-neutral-400 py-4 text-center">No in-stock pieces in this godown</p>
+                  ) : (
+                    <div className="max-h-48 overflow-y-auto border border-neutral-200 rounded-lg divide-y divide-neutral-100">
+                      {availablePieces.map((u, idx) => {
+                        const checked = selectedPieceIds.has(u.id);
+                        return (
+                          <label key={u.id} className={`flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-neutral-50 transition-colors ${checked ? 'bg-primary-50' : ''}`}>
+                            <input type="checkbox" checked={checked} onChange={() => {
+                              setSelectedPieceIds(prev => {
+                                const next = new Set(prev);
+                                if (next.has(u.id)) next.delete(u.id); else next.add(u.id);
+                                return next;
+                              });
+                            }} className="w-3.5 h-3.5 accent-primary-600" />
+                            <span className="text-xs font-medium text-neutral-700">Piece #{idx + 1}</span>
+                            <span className="text-xs text-neutral-500 ml-auto font-mono">{u.weight} {u.weight_unit === 'carat' ? 'ct' : wLabel}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {selectedPieceIds.size > 0 && (
+                    <p className="text-[10px] text-primary-700 mt-1.5 font-medium">
+                      {selectedPieceIds.size} piece{selectedPieceIds.size > 1 ? 's' : ''} selected &bull; {selTotal.toFixed(2)} {wLabel} total
+                    </p>
+                  )}
+                </div>
+              );
+            }
+            return (
+              <div>
+                <label className="label">
+                  Piece Weights — one per line ({wLabel})
+                </label>
+                <textarea
+                  value={stockForm.piece_weights}
+                  onChange={e => setStockForm(f => ({ ...f, piece_weights: e.target.value }))}
+                  className="input h-28 text-xs resize-none font-mono"
+                  placeholder={'2.3\n4.1\n1.8'}
+                />
+                <p className="text-[10px] text-neutral-400 mt-0.5">Each line = one piece. 3 lines = 3 pieces added to stock.</p>
+              </div>
+            );
+          })() : (
             <div>
               <label className="label">Quantity</label>
-              <input type="number" step={selectedProduct?.is_gemstone ? '1' : '1'} min={0} value={stockForm.quantity} onChange={e => setStockForm(f => ({ ...f, quantity: e.target.value }))} className="input" placeholder="0" />
+              <input type="number" step="1" min={0} value={stockForm.quantity} onChange={e => setStockForm(f => ({ ...f, quantity: e.target.value }))} className="input" placeholder="0" />
             </div>
           )}
           <div>
@@ -1005,7 +1058,14 @@ export default function Inventory() {
           </div>
           {selectedProduct && (
             <div className="bg-neutral-50 px-3 py-2 rounded-lg">
-              <p className="text-xs text-neutral-500">Total stock: <strong>{selectedProduct.stock_quantity} {selectedProduct.unit}</strong></p>
+              {selectedProduct.is_gemstone ? (
+                <p className="text-xs text-neutral-500">
+                  In stock: <strong>{(productUnitsMap[selectedProduct.id] || []).filter(u => u.status === 'in_stock').length} pcs</strong>
+                  {' · '}<strong>{(productUnitsMap[selectedProduct.id] || []).filter(u => u.status === 'in_stock').reduce((s, u) => s + (u.weight || 0), 0).toFixed(2)} {selectedProduct.weight_unit === 'carats' ? 'ct' : 'g'} total</strong>
+                </p>
+              ) : (
+                <p className="text-xs text-neutral-500">Total stock: <strong>{selectedProduct.stock_quantity} {selectedProduct.unit}</strong></p>
+              )}
             </div>
           )}
         </div>

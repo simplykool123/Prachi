@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Package, AlertTriangle, Search, TrendingUp, TrendingDown, RefreshCw, X, ChevronRight, ChevronDown } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { formatCurrency, formatDate } from '../../lib/utils';
@@ -23,9 +23,14 @@ interface ProductWithStock {
   selling_price: number;
   purchase_price: number;
   product_type: string;
+  is_gemstone?: boolean;
+  weight_unit?: string;
   total_quantity: number;
   godown_quantities: Record<string, number>;
   variants?: VariantStockRow[];
+  piece_count?: number;
+  total_weight_grams?: number;
+  pieces_by_godown?: Record<string, { count: number; weight: number }>;
 }
 
 interface MovementWithProduct extends StockMovement {
@@ -43,6 +48,7 @@ export default function GodownStockPage() {
   const [drillProduct, setDrillProduct] = useState<ProductWithStock | null>(null);
   const [movements, setMovements] = useState<MovementWithProduct[]>([]);
   const [movementsLoading, setMovementsLoading] = useState(false);
+  const [gemPieces, setGemPieces] = useState<any[]>([]);
 
   useEffect(() => { loadData(); }, []);
   useEffect(() => {
@@ -53,16 +59,18 @@ export default function GodownStockPage() {
 
   const loadData = async () => {
     setLoading(true);
-    const [godownsRes, stockRes] = await Promise.all([
+    const [godownsRes, stockRes, piecesRes] = await Promise.all([
       supabase.from('godowns').select('*').eq('is_active', true).order('name'),
       supabase.from('godown_stock')
-        .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price, product_type), product_variants(id, name, sku, selling_price, purchase_price)')
+        .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price, product_type, is_gemstone, weight_unit), product_variants(id, name, sku, selling_price, purchase_price)')
         .gte('quantity', 0)
         .order('quantity', { ascending: false })
         .limit(1000),
+      supabase.from('product_units').select('id, product_id, weight, weight_unit, godown_id, status').eq('status', 'in_stock'),
     ]);
     setGodowns(godownsRes.data || []);
     setAllStock((stockRes.data || []) as GodownStock[]);
+    setGemPieces(piecesRes.data || []);
     setLoading(false);
   };
 
@@ -117,6 +125,8 @@ export default function GodownStockPage() {
           selling_price: p.selling_price,
           purchase_price: p.purchase_price,
           product_type: p.product_type || 'simple',
+          is_gemstone: p.is_gemstone || p.product_type === 'gemstone',
+          weight_unit: p.weight_unit,
           total_quantity: 0,
           godown_quantities: {},
           variants: [],
@@ -126,7 +136,6 @@ export default function GodownStockPage() {
       const row = productMap[s.product_id];
 
       if (v && s.variant_id) {
-        // Variant stock row
         let variantRow = row.variants!.find(vr => vr.variant_id === s.variant_id);
         if (!variantRow) {
           variantRow = {
@@ -145,10 +154,26 @@ export default function GodownStockPage() {
         row.total_quantity += s.quantity;
         row.godown_quantities[s.godown_id] = (row.godown_quantities[s.godown_id] || 0) + s.quantity;
       } else {
-        // Simple/weight/gemstone stock row
         row.total_quantity += s.quantity;
         row.godown_quantities[s.godown_id] = (row.godown_quantities[s.godown_id] || 0) + s.quantity;
       }
+    }
+
+    // Enrich gemstone products with piece data from product_units
+    for (const row of Object.values(productMap)) {
+      if (!row.is_gemstone) continue;
+      const pieces = gemPieces.filter(u => u.product_id === row.product_id);
+      row.piece_count = pieces.length;
+      row.total_weight_grams = pieces.reduce((s: number, u: any) => s + (u.weight || 0), 0);
+      row.total_quantity = pieces.length; // override with actual piece count
+      const byGodown: Record<string, { count: number; weight: number }> = {};
+      for (const u of pieces) {
+        const gid = u.godown_id || 'unassigned';
+        if (!byGodown[gid]) byGodown[gid] = { count: 0, weight: 0 };
+        byGodown[gid].count++;
+        byGodown[gid].weight += u.weight || 0;
+      }
+      row.pieces_by_godown = byGodown;
     }
 
     return Object.values(productMap);
@@ -322,6 +347,7 @@ export default function GodownStockPage() {
                 <tbody>
                   {filtered.map(p => {
                     const isVariant = p.product_type === 'variant' && (p.variants?.length || 0) > 0;
+                    const isGemstone = p.is_gemstone || p.product_type === 'gemstone';
                     const isExpanded = expandedVariantProducts.has(p.product_id);
                     const isLow = p.low_stock_alert > 0 && p.total_quantity <= p.low_stock_alert;
                     const isOut = p.total_quantity === 0;
@@ -329,11 +355,11 @@ export default function GodownStockPage() {
                     const rowValue = isVariant
                       ? (p.variants || []).reduce((s, v) => s + v.total_quantity * v.selling_price, 0)
                       : p.total_quantity * p.selling_price;
+                    const wLabel = p.weight_unit === 'carats' ? 'ct' : 'g';
 
                     return (
-                      <>
+                      <React.Fragment key={p.product_id}>
                         <tr
-                          key={p.product_id}
                           className={`border-b border-neutral-50 transition-colors ${
                             isVariant
                               ? 'cursor-pointer hover:bg-blue-50/40'
@@ -358,23 +384,47 @@ export default function GodownStockPage() {
                                   {p.variants!.length} variants
                                 </span>
                               )}
+                              {isGemstone && (
+                                <span className="text-[10px] font-medium text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">gem</span>
+                              )}
                             </div>
                           </td>
                           <td className="table-cell text-xs text-neutral-500 font-mono">{p.sku || '—'}</td>
                           <td className="table-cell text-right">
-                            <span className={`font-bold text-sm ${isOut ? 'text-error-600' : isLow ? 'text-warning-600' : 'text-neutral-900'}`}>
-                              {p.total_quantity}
-                            </span>
-                            {p.low_stock_alert > 0 && (
-                              <p className="text-[9px] text-neutral-400">min: {p.low_stock_alert}</p>
+                            {isGemstone ? (
+                              <>
+                                <span className={`font-bold text-sm ${isOut ? 'text-error-600' : isLow ? 'text-warning-600' : 'text-neutral-900'}`}>
+                                  {p.piece_count ?? p.total_quantity} pcs
+                                </span>
+                                {(p.total_weight_grams || 0) > 0 && (
+                                  <p className="text-[10px] text-neutral-500">{(p.total_weight_grams || 0).toFixed(2)} {wLabel}</p>
+                                )}
+                              </>
+                            ) : (
+                              <>
+                                <span className={`font-bold text-sm ${isOut ? 'text-error-600' : isLow ? 'text-warning-600' : 'text-neutral-900'}`}>
+                                  {p.total_quantity}
+                                </span>
+                                {p.low_stock_alert > 0 && (
+                                  <p className="text-[9px] text-neutral-400">min: {p.low_stock_alert}</p>
+                                )}
+                              </>
                             )}
                           </td>
                           <td className="table-cell text-xs text-neutral-500">{p.unit}</td>
                           {activeTab === 'overall' && godowns.map(g => (
                             <td key={g.id} className="table-cell text-right text-xs text-neutral-600">
-                              <span className={p.godown_quantities[g.id] ? 'font-medium' : 'text-neutral-300'}>
-                                {p.godown_quantities[g.id] || 0}
-                              </span>
+                              {isGemstone ? (
+                                <span className={p.pieces_by_godown?.[g.id]?.count ? 'font-medium' : 'text-neutral-300'}>
+                                  {p.pieces_by_godown?.[g.id]?.count
+                                    ? `${p.pieces_by_godown[g.id].count} pcs`
+                                    : '—'}
+                                </span>
+                              ) : (
+                                <span className={p.godown_quantities[g.id] ? 'font-medium' : 'text-neutral-300'}>
+                                  {p.godown_quantities[g.id] || 0}
+                                </span>
+                              )}
                             </td>
                           ))}
                           <td className="table-cell text-right text-xs font-medium text-neutral-600">
@@ -439,7 +489,7 @@ export default function GodownStockPage() {
                             </tr>
                           );
                         })}
-                      </>
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
@@ -465,20 +515,51 @@ export default function GodownStockPage() {
           </div>
 
           <div className="overflow-y-auto flex-1 p-5 space-y-4">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="card !p-3">
-                <p className="text-xs text-neutral-500 mb-1">Total Stock</p>
-                <p className="text-xl font-bold text-neutral-900">{drillProduct.total_quantity}</p>
-                <p className="text-[10px] text-neutral-400 mt-0.5">{drillProduct.unit}</p>
-              </div>
-              {godowns.map(g => (
-                <div key={g.id} className="card !p-3">
-                  <p className="text-xs text-neutral-500 mb-1 truncate">{g.name}</p>
-                  <p className="text-xl font-bold text-neutral-900">{drillProduct.godown_quantities[g.id] || 0}</p>
-                  <p className="text-[10px] text-neutral-400 mt-0.5">{drillProduct.unit}</p>
+            {(() => {
+              const isDrillGem = drillProduct.is_gemstone || drillProduct.product_type === 'gemstone';
+              const dWLabel = drillProduct.weight_unit === 'carats' ? 'ct' : 'g';
+              if (isDrillGem) {
+                return (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="card !p-3">
+                      <p className="text-xs text-neutral-500 mb-1">Total Pieces</p>
+                      <p className="text-xl font-bold text-neutral-900">{drillProduct.piece_count ?? drillProduct.total_quantity}</p>
+                      {(drillProduct.total_weight_grams || 0) > 0 && (
+                        <p className="text-[10px] text-neutral-400 mt-0.5">{(drillProduct.total_weight_grams || 0).toFixed(2)} {dWLabel} total</p>
+                      )}
+                    </div>
+                    {godowns.map(g => {
+                      const gData = drillProduct.pieces_by_godown?.[g.id];
+                      return (
+                        <div key={g.id} className="card !p-3">
+                          <p className="text-xs text-neutral-500 mb-1 truncate">{g.name}</p>
+                          <p className="text-xl font-bold text-neutral-900">{gData?.count ?? 0} pcs</p>
+                          {(gData?.weight || 0) > 0 && (
+                            <p className="text-[10px] text-neutral-400 mt-0.5">{(gData?.weight || 0).toFixed(2)} {dWLabel}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              }
+              return (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="card !p-3">
+                    <p className="text-xs text-neutral-500 mb-1">Total Stock</p>
+                    <p className="text-xl font-bold text-neutral-900">{drillProduct.total_quantity}</p>
+                    <p className="text-[10px] text-neutral-400 mt-0.5">{drillProduct.unit}</p>
+                  </div>
+                  {godowns.map(g => (
+                    <div key={g.id} className="card !p-3">
+                      <p className="text-xs text-neutral-500 mb-1 truncate">{g.name}</p>
+                      <p className="text-xl font-bold text-neutral-900">{drillProduct.godown_quantities[g.id] || 0}</p>
+                      <p className="text-[10px] text-neutral-400 mt-0.5">{drillProduct.unit}</p>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              );
+            })()}
 
             <div>
               <h3 className="text-sm font-semibold text-neutral-800 mb-3">Movement History</h3>

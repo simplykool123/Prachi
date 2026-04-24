@@ -1205,8 +1205,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                     const units = lineUnits[i] || [];
                     const s = pType === 'gemstone' ? (lineUnits[i]?.length ?? undefined) : godownStockMap[item.product_id];
                     return (
-                      <>
-                      <tr key={i} className="border-t border-neutral-100">
+                      <React.Fragment key={i}>
+                      <tr className="border-t border-neutral-100">
                         <td className="px-3 py-2">
                           <ProductCombobox
                             products={products}
@@ -1301,7 +1301,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                           </td>
                         </tr>
                       )}
-                      </>
+                      </React.Fragment>
                     );
                   })}
                 </tbody>

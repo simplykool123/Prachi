@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, Search, FileText, Building2, ChevronDown, ChevronRight, X, Download, Warehouse, Truck, Pencil, XCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { formatCurrency, formatDate, nextDocNumber, exportToCSV } from '../lib/utils';
@@ -705,8 +705,8 @@ export default function Purchase() {
                     : null;
 
                   return (
-                    <>
-                      <tr key={e.id} className="border-b border-neutral-50 hover:bg-neutral-50 transition-colors">
+                    <React.Fragment key={e.id}>
+                      <tr className="border-b border-neutral-50 hover:bg-neutral-50 transition-colors">
                         <td className="table-cell w-8">
                           <button
                             onClick={() => toggleExpand(e.id)}
@@ -837,7 +837,7 @@ export default function Purchase() {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -968,8 +968,8 @@ export default function Purchase() {
                     const totalWeight = weights.reduce((s, w) => s + w, 0);
                     const productVariants = item.product_id ? (variantsMap[item.product_id] || []) : [];
                     return (
-                      <>
-                        <tr key={i} className="border-t border-neutral-100">
+                      <React.Fragment key={i}>
+                        <tr className="border-t border-neutral-100">
                           <td className="px-3 py-2">
                             <select value={item.product_id} onChange={e => updateItem(i, 'product_id', e.target.value)} className="input text-xs">
                               <option value="">-- Select Product --</option>
@@ -1047,7 +1047,7 @@ export default function Purchase() {
                             </td>
                           </tr>
                         )}
-                      </>
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
@@ -1091,8 +1091,8 @@ export default function Purchase() {
                   const recv = parseFloat(item.received_qty) || 0;
                   const remaining = Math.max(0, item.ordered_qty - recv);
                   return (
-                    <>
-                      <tr key={i} className="border-t border-neutral-100">
+                    <React.Fragment key={i}>
+                      <tr className="border-t border-neutral-100">
                         <td className="px-3 py-2.5">
                           <p className="text-sm font-medium text-neutral-800">{item.product_name}</p>
                           <p className="text-[10px] text-neutral-400">{item.unit}{item.is_gemstone && <span className="ml-1 text-primary-600 font-semibold">Gemstone</span>}</p>
@@ -1136,7 +1136,7 @@ export default function Purchase() {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </React.Fragment>
                   );
                 })}
               </tbody>
