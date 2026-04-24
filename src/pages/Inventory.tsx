@@ -65,25 +65,6 @@ export default function Inventory() {
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
 
-  useEffect(() => { loadData(); fetchCompanies().then(setCompanies); }, []);
-  useVisibilityReload(loadData);
-  useEffect(() => {
-    if (!openRowMenu) return;
-    const handler = () => setOpenRowMenu(null);
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [openRowMenu]);
-
-  useEffect(() => {
-    let data = products;
-    if (category !== 'All') data = data.filter(p => p.category === category);
-    if (stockStatus === 'In Stock') data = data.filter(p => p.stock_quantity > p.low_stock_alert);
-    if (stockStatus === 'Low Alert') data = data.filter(p => p.stock_quantity > 0 && p.stock_quantity <= p.low_stock_alert);
-    if (stockStatus === 'Out of Stock') data = data.filter(p => p.stock_quantity <= 0);
-    if (search) data = data.filter(p => p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase()));
-    setFiltered(data);
-  }, [products, category, stockStatus, search]);
-
   const loadData = async () => {
     setLoading(true);
     const [productsRes, godownsRes, godownStockRes, unitsRes, variantsRes] = await Promise.all([
@@ -126,6 +107,25 @@ export default function Inventory() {
     setGodowns(godownsRes.data || []);
     setLoading(false);
   };
+
+  useEffect(() => { loadData(); fetchCompanies().then(setCompanies); }, []);
+  useVisibilityReload(loadData);
+  useEffect(() => {
+    if (!openRowMenu) return;
+    const handler = () => setOpenRowMenu(null);
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [openRowMenu]);
+
+  useEffect(() => {
+    let data = products;
+    if (category !== 'All') data = data.filter(p => p.category === category);
+    if (stockStatus === 'In Stock') data = data.filter(p => p.stock_quantity > p.low_stock_alert);
+    if (stockStatus === 'Low Alert') data = data.filter(p => p.stock_quantity > 0 && p.stock_quantity <= p.low_stock_alert);
+    if (stockStatus === 'Out of Stock') data = data.filter(p => p.stock_quantity <= 0);
+    if (search) data = data.filter(p => p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase()));
+    setFiltered(data);
+  }, [products, category, stockStatus, search]);
 
   const openAdd = () => {
     setEditing(null);
