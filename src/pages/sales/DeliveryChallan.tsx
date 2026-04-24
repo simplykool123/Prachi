@@ -109,7 +109,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     const [challansRes, productsRes, customersRes, soRes, godownsRes] = await Promise.all([
       supabase.from('delivery_challans').select('id, challan_number, sales_order_id, customer_id, customer_name, customer_phone, customer_address, customer_address2, customer_city, customer_state, customer_pincode, is_b2b, ship_to_name, ship_to_phone, ship_to_address1, ship_to_address2, ship_to_city, ship_to_state, ship_to_pin, challan_date, dispatch_mode, courier_company, tracking_number, status, notes, company_id, created_at').gte('challan_date', thirtyDaysAgo).order('created_at', { ascending: false }).limit(200),
-      supabase.from('products').select('id, name, unit, selling_price, company_id').eq('is_active', true),
+      supabase.from('products').select('id, name, unit, selling_price, company_id').eq('is_active', true).order('name', { ascending: true }),
       supabase.from('customers').select('id, name, phone, address, address2, city, state, pincode').eq('is_active', true).order('name'),
       supabase.from('sales_orders').select('id, so_number, customer_id, customer_name, status, is_b2b').order('created_at', { ascending: false }).limit(500),
       supabase.from('godowns').select('id, name').eq('is_active', true).order('name'),

@@ -20,7 +20,7 @@ export interface Product {
   weight_grams?: number;
   total_weight?: number;
   remaining_weight?: number;
-  weight_unit?: 'grams' | 'carats';
+  weight_unit?: 'grams' | 'carats' | 'kg';
   is_active?: boolean;
   created_at?: string;
   updated_at?: string;

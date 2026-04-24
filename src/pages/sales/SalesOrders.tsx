@@ -160,7 +160,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       created_at: '',
       updated_at: '',
       is_gemstone: !!p.is_gemstone,
-      weight_unit: (p.weight_unit as 'grams' | 'carats' | undefined),
+      weight_unit: (p.weight_unit as 'grams' | 'carats' | 'kg' | undefined),
       product_type: (p.product_type as ProductType | undefined),
     })));
     const byVariant: Record<string, ProductVariant[]> = {};

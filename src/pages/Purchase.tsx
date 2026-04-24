@@ -113,7 +113,7 @@ export default function Purchase() {
     const [entriesRes, suppliersRes, productsRes, godownsRes, variantsRes] = await Promise.all([
       supabase.from('purchase_entries').select('*').order('created_at', { ascending: false }),
       supabase.from('suppliers').select('*').eq('is_active', true).order('name'),
-      supabase.from('products').select('id, name, unit, purchase_price, is_gemstone, weight_unit, product_type').eq('is_active', true),
+      supabase.from('products').select('id, name, unit, purchase_price, is_gemstone, weight_unit, product_type').eq('is_active', true).order('name', { ascending: true }),
       supabase.from('godowns').select('*').eq('is_active', true).order('name'),
       supabase.from('product_variants').select('*').eq('is_active', true).order('name'),
     ]);

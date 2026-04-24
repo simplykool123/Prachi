@@ -72,7 +72,7 @@ export default function SalesReturns() {
         .lte('return_date', dateRange.to)
         .order('created_at', { ascending: false }),
       supabase.from('invoices').select('id, invoice_number, customer_name, customer_id').order('created_at', { ascending: false }),
-      supabase.from('products').select('id, name, unit, selling_price, stock_quantity').eq('is_active', true),
+      supabase.from('products').select('id, name, unit, selling_price, stock_quantity').eq('is_active', true).order('name', { ascending: true }),
     ]);
     setReturns(returnsRes.data || []);
     setInvoices((invoicesRes.data || []) as InvoiceOption[]);

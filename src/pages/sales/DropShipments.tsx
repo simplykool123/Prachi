@@ -80,7 +80,7 @@ export default function DropShipments() {
       supabase.from('drop_shipments').select('*').order('created_at', { ascending: false }),
       supabase.from('suppliers').select('*').eq('is_active', true).order('name'),
       supabase.from('customers').select('id, name, phone, address, city, category').eq('is_active', true).eq('category', 'B2B').order('name'),
-      supabase.from('products').select('id, name, unit, selling_price').eq('is_active', true),
+      supabase.from('products').select('id, name, unit, selling_price').eq('is_active', true).order('name', { ascending: true }),
     ]);
     setShipments((dsRes.data || []) as DropShipment[]);
     setSuppliers((supplierRes.data || []) as Supplier[]);

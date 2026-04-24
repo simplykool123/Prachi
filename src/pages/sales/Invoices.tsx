@@ -207,7 +207,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
         .lte('invoice_date', dateRange.to)
         .order('created_at', { ascending: false })
         .limit(200),
-      supabase.from('products').select('id, name, unit, selling_price').eq('is_active', true),
+      supabase.from('products').select('id, name, unit, selling_price').eq('is_active', true).order('name', { ascending: true }),
       supabase.from('customers').select('id, name, phone, alt_phone, address, address2, city, state, pincode').eq('is_active', true).order('name'),
       fetchGodowns(),
       supabase.from('sales_orders').select('id, so_number, is_b2b').order('created_at', { ascending: false }).limit(500),

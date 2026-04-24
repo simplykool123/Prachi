@@ -53,12 +53,14 @@ export default function Inventory() {
     purchase_price: '', selling_price: '', low_stock_alert: '5',
     description: '', sku: '', image_url: '',
     direction: '', is_gemstone: false, weight_grams: '',
-    total_weight: '', weight_unit: 'grams' as 'grams' | 'carats',
+    total_weight: '', weight_unit: 'grams' as 'grams' | 'carats' | 'kg',
     low_stock_enabled: true,
     company_id: '',
   });
   const [stockForm, setStockForm] = useState({ type: 'adjustment', quantity: '', notes: '', movement_label: 'adjustment', godown_id: '', piece_weights: '' });
   const [selectedPieceIds, setSelectedPieceIds] = useState<Set<string>>(new Set());
+  const [pieceEdits, setPieceEdits] = useState<Record<string, string>>({});
+  const [pieceDeletes, setPieceDeletes] = useState<Set<string>>(new Set());
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
 
@@ -83,7 +85,7 @@ export default function Inventory() {
   const loadData = async () => {
     setLoading(true);
     const [productsRes, godownsRes, godownStockRes, unitsRes, variantsRes] = await Promise.all([
-      supabase.from('products').select('*').eq('is_active', true).order('created_at', { ascending: false }),
+      supabase.from('products').select('*').eq('is_active', true).order('name', { ascending: true }),
       supabase.from('godowns').select('*').eq('is_active', true).order('name'),
       supabase.from('godown_stock').select('product_id, quantity'),
       supabase.from('product_units').select('*').order('created_at', { ascending: false }),
@@ -173,7 +175,7 @@ export default function Inventory() {
       direction: p.direction || '', is_gemstone: p.is_gemstone || false,
       weight_grams: p.weight_grams ? String(p.weight_grams) : '',
       total_weight: p.total_weight ? String(p.total_weight) : '',
-      weight_unit: (p.weight_unit as 'grams' | 'carats') || 'grams',
+      weight_unit: (p.weight_unit as 'grams' | 'carats' | 'kg') || 'grams',
       low_stock_enabled: p.low_stock_alert > 0,
       company_id: p.company_id || '',
     });
@@ -349,6 +351,8 @@ export default function Inventory() {
     setSelectedProduct(p);
     setStockForm({ type: 'in', quantity: '', notes: '', movement_label: 'purchase', godown_id: godowns[0]?.id || '', piece_weights: '' });
     setSelectedPieceIds(new Set());
+    setPieceEdits({});
+    setPieceDeletes(new Set());
     setShowStockModal(true);
   };
 
@@ -415,6 +419,32 @@ export default function Inventory() {
             reference_type: 'manual_stock_update',
             notes: stockForm.notes,
           });
+        } else if (mvType === 'edit') {
+          const editEntries = Object.entries(pieceEdits).filter(([id, val]) => {
+            if (pieceDeletes.has(id)) return false;
+            const orig = (productUnitsMap[selectedProduct.id] || []).find(u => u.id === id);
+            const num = Number(val);
+            return orig && Number.isFinite(num) && num > 0 && num !== orig.weight;
+          });
+          for (const [id, val] of editEntries) {
+            const { error: upErr } = await supabase.from('product_units').update({ weight: Number(val) }).eq('id', id);
+            if (upErr) throw upErr;
+          }
+          const toRemove = Array.from(pieceDeletes);
+          if (toRemove.length > 0) {
+            const { error: delErr } = await supabase.from('product_units').delete().in('id', toRemove);
+            if (delErr) throw delErr;
+            await processStockMovement({
+              type: 'adjustment',
+              items: [{ product_id: selectedProduct.id, godown_id: godownId, quantity: -toRemove.length }],
+              reference_type: 'manual_stock_update',
+              notes: `Removed ${toRemove.length} piece(s). ${stockForm.notes || ''}`.trim(),
+            });
+          }
+          if (editEntries.length === 0 && toRemove.length === 0) {
+            alert('No changes to save.');
+            return;
+          }
         } else {
           alert('Use Purchase/Return/Sale for gemstone piece tracking.');
           return;
@@ -820,8 +850,9 @@ export default function Inventory() {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="label">Weight Unit</label>
-                <select value={form.weight_unit} onChange={e => setForm(f => ({ ...f, weight_unit: e.target.value as 'grams' | 'carats' }))} className="input text-xs">
+                <select value={form.weight_unit} onChange={e => setForm(f => ({ ...f, weight_unit: e.target.value as 'grams' | 'carats' | 'kg' }))} className="input text-xs">
                   <option value="grams">Grams (g)</option>
+                  <option value="kg">Kilograms (kg)</option>
                   <option value="carats">Carats (ct)</option>
                 </select>
               </div>
@@ -961,7 +992,7 @@ export default function Inventory() {
           {godowns.length > 0 && (
             <div>
               <label className="label">Godown</label>
-              <select value={stockForm.godown_id} onChange={e => { setStockForm(f => ({ ...f, godown_id: e.target.value })); setSelectedPieceIds(new Set()); }} className="input text-xs">
+              <select value={stockForm.godown_id} onChange={e => { setStockForm(f => ({ ...f, godown_id: e.target.value })); setSelectedPieceIds(new Set()); setPieceEdits({}); setPieceDeletes(new Set()); }} className="input text-xs">
                 {godowns.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
               </select>
             </div>
@@ -973,9 +1004,9 @@ export default function Inventory() {
                 { value: 'purchase', label: 'Purchase (In)' },
                 { value: 'sale', label: 'Sale (Out)' },
                 { value: 'return', label: 'Return (In)' },
-                ...(!selectedProduct?.is_gemstone ? [{ value: 'adjustment', label: 'Adjustment' }] : []),
+                ...(selectedProduct?.is_gemstone ? [{ value: 'edit', label: 'Edit Pieces' }] : [{ value: 'adjustment', label: 'Adjustment' }]),
               ].map(t => (
-                <button key={t.value} onClick={() => { setStockForm(f => ({ ...f, movement_label: t.value, type: ['purchase', 'return'].includes(t.value) ? 'in' : t.value === 'sale' ? 'out' : 'adjustment' })); setSelectedPieceIds(new Set()); }}
+                <button key={t.value} onClick={() => { setStockForm(f => ({ ...f, movement_label: t.value, type: ['purchase', 'return'].includes(t.value) ? 'in' : t.value === 'sale' ? 'out' : 'adjustment' })); setSelectedPieceIds(new Set()); setPieceEdits({}); setPieceDeletes(new Set()); }}
                   className={`py-1.5 px-3 rounded-lg text-xs font-medium transition-colors text-left ${stockForm.movement_label === t.value ? 'bg-primary-600 text-white' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}>
                   {t.label}
                 </button>
@@ -1029,6 +1060,50 @@ export default function Inventory() {
                       {selectedPieceIds.size} piece{selectedPieceIds.size > 1 ? 's' : ''} selected &bull; {selTotal.toFixed(2)} {wLabel} total
                     </p>
                   )}
+                </div>
+              );
+            }
+            if (stockForm.movement_label === 'edit') {
+              return (
+                <div>
+                  <label className="label">Edit / Remove In-Stock Pieces</label>
+                  {availablePieces.length === 0 ? (
+                    <p className="text-xs text-neutral-400 py-4 text-center">No in-stock pieces in this godown</p>
+                  ) : (
+                    <div className="max-h-60 overflow-y-auto border border-neutral-200 rounded-lg divide-y divide-neutral-100">
+                      {availablePieces.map((u, idx) => {
+                        const marked = pieceDeletes.has(u.id);
+                        const current = pieceEdits[u.id] ?? String(u.weight);
+                        return (
+                          <div key={u.id} className={`flex items-center gap-2 px-2.5 py-1.5 ${marked ? 'bg-error-50 line-through opacity-60' : ''}`}>
+                            <span className="text-xs font-medium text-neutral-600 w-14 shrink-0">Piece #{idx + 1}</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min={0}
+                              disabled={marked}
+                              value={current}
+                              onChange={e => setPieceEdits(prev => ({ ...prev, [u.id]: e.target.value }))}
+                              className="input text-xs flex-1 h-7 !py-0.5"
+                            />
+                            <span className="text-[10px] text-neutral-400 w-5 shrink-0">{u.weight_unit === 'carat' ? 'ct' : wLabel}</span>
+                            <button
+                              type="button"
+                              onClick={() => setPieceDeletes(prev => {
+                                const next = new Set(prev);
+                                if (next.has(u.id)) next.delete(u.id); else next.add(u.id);
+                                return next;
+                              })}
+                              className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${marked ? 'border-neutral-300 text-neutral-600 hover:bg-neutral-50' : 'border-error-300 text-error-700 hover:bg-error-50'}`}
+                            >
+                              {marked ? 'Undo' : 'Remove'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-neutral-400 mt-1.5">Edit weights inline. Click Remove to mark a piece for deletion, then click Update Stock to save.</p>
                 </div>
               );
             }
