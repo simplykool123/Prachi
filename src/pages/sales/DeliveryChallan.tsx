@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, Printer, Truck, Download, Eye, Pencil, Trash2, Send, Receipt, FileText, X, MoreVertical } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { formatDate, formatCurrency, generateId, nextDocNumber, exportToCSV } from '../../lib/utils';
+import { formatDate, formatCurrency, generateId, nextDocNumber, exportToCSV, useVisibilityReload } from '../../lib/utils';
 import { getSmartRate } from '../../lib/rateCardService';
 import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
@@ -98,6 +98,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
   const [items, setItems] = useState<LineItem[]>([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: '' }]);
 
   useEffect(() => { loadData(); }, []);
+  useVisibilityReload(loadData);
   useEffect(() => {
     if (!openRowMenu) return;
     const handler = () => setOpenRowMenu(null);

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, Truck, CheckCircle, Package, IndianRupee, ArrowUpRight, Printer, Pencil, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { formatCurrency, formatDate, generateId } from '../lib/utils';
+import { formatCurrency, formatDate, generateId, useVisibilityReload } from '../lib/utils';
 import { useCompanySettings } from '../lib/useCompanySettings';
 import Modal from '../components/ui/Modal';
 import EmptyState from '../components/ui/EmptyState';
@@ -71,6 +71,7 @@ export default function Courier({ prefillFromDC }: CourierProps) {
   const [printEntry, setPrintEntry] = useState<(CourierEntry & typeof emptyForm) | null>(null);
 
   useEffect(() => { loadData(); }, []);
+  useVisibilityReload(loadData);
 
   // Auto-open add modal when Challan "Create Shipment" is clicked
   useEffect(() => {

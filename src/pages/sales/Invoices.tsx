@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Plus, Search, CreditCard, FileText, Download, Printer, Pencil, Eye, CheckCircle, XCircle, X, Truck } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { formatCurrency, formatDate, formatDateInput, generateId, nextDocNumber, exportToCSV } from '../../lib/utils';
+import { formatCurrency, formatDate, formatDateInput, generateId, nextDocNumber, exportToCSV, useVisibilityReload } from '../../lib/utils';
 import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
@@ -113,6 +113,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
   const [payForm, setPayForm] = useState({ amount: '', payment_mode: 'Cash', reference_number: '', payment_date: new Date().toISOString().split('T')[0] });
 
   useEffect(() => { loadData(); }, [dateRange]);
+  useVisibilityReload(loadData);
 
   useEffect(() => {
     if (!prefillFromDC) return;

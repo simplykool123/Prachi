@@ -130,3 +130,28 @@ const EMAIL_DOMAIN = import.meta.env.VITE_EMAIL_DOMAIN || 'prachifulagar.app';
 export const usernameToEmail = (username: string): string => {
   return `${username.toLowerCase().replace(/\s+/g, '.')}@${EMAIL_DOMAIN}`;
 };
+
+import { useEffect, useRef } from 'react';
+
+/**
+ * Calls `reload` when the browser tab becomes visible again after being hidden
+ * for more than `idleMs` milliseconds (default 60 s). This ensures stale data
+ * is refreshed when the user returns to the tab after being idle.
+ */
+export function useVisibilityReload(reload: () => void, idleMs = 60_000) {
+  const hiddenAt = useRef<number | null>(null);
+  useEffect(() => {
+    const handler = () => {
+      if (document.hidden) {
+        hiddenAt.current = Date.now();
+      } else {
+        if (hiddenAt.current !== null && Date.now() - hiddenAt.current > idleMs) {
+          reload();
+        }
+        hiddenAt.current = null;
+      }
+    };
+    document.addEventListener('visibilitychange', handler);
+    return () => document.removeEventListener('visibilitychange', handler);
+  }, [reload, idleMs]);
+}

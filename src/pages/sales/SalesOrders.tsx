@@ -3,7 +3,7 @@ import { Plus, Search, FileText, ChevronDown, ChevronRight, Receipt, Truck, Down
 import { INDIA_STATES } from '../../lib/indiaData';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { supabase } from '../../lib/supabase';
-import { formatCurrency, formatDate, generateId, nextDocNumber, exportToCSV } from '../../lib/utils';
+import { formatCurrency, formatDate, generateId, nextDocNumber, exportToCSV, useVisibilityReload } from '../../lib/utils';
 import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
@@ -107,6 +107,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const [items, setItems] = useState<LineItem[]>([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', discount_pct: '0', total_price: 0, godown_id: '' }]);
 
   useEffect(() => { loadData(); }, []);
+  useVisibilityReload(loadData);
 
   useEffect(() => {
     if (showModal) {

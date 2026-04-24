@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Package, AlertTriangle, Search, TrendingUp, TrendingDown, RefreshCw, X, ChevronRight, ChevronDown } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { formatCurrency, formatDate } from '../../lib/utils';
+import { formatCurrency, formatDate, useVisibilityReload } from '../../lib/utils';
 import type { Godown, GodownStock, StockMovement } from '../../types';
 
 interface VariantStockRow {
@@ -51,6 +51,7 @@ export default function GodownStockPage() {
   const [gemPieces, setGemPieces] = useState<any[]>([]);
 
   useEffect(() => { loadData(); }, []);
+  useVisibilityReload(loadData);
   useEffect(() => {
     if (activeTab !== 'overall') {
       loadGodownStock(activeTab);

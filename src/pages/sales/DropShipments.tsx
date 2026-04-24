@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, ChevronDown, ChevronRight, X, Download, Truck, Building2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { formatCurrency, formatDate, nextDocNumber, exportToCSV } from '../../lib/utils';
+import { formatCurrency, formatDate, nextDocNumber, exportToCSV, useVisibilityReload } from '../../lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal from '../../components/ui/Modal';
 import EmptyState from '../../components/ui/EmptyState';
@@ -74,6 +74,7 @@ export default function DropShipments() {
   ]);
 
   useEffect(() => { loadData(); }, []);
+  useVisibilityReload(loadData);
 
   const loadData = async () => {
     const [dsRes, supplierRes, customerRes, productRes] = await Promise.all([

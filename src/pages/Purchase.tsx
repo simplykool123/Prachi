@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, FileText, Building2, ChevronDown, ChevronRight, X, Download, Warehouse, Truck, Pencil, XCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { formatCurrency, formatDate, nextDocNumber, exportToCSV } from '../lib/utils';
+import { formatCurrency, formatDate, nextDocNumber, exportToCSV, useVisibilityReload } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/ui/Modal';
 import EmptyState from '../components/ui/EmptyState';
@@ -108,6 +108,7 @@ export default function Purchase() {
   });
 
   useEffect(() => { loadData(); }, []);
+  useVisibilityReload(loadData);
 
   const loadData = async () => {
     const [entriesRes, suppliersRes, productsRes, godownsRes, variantsRes] = await Promise.all([

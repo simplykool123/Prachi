@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, ArrowUpDown, Search, BarChart2, AlertTriangle, ImagePlus, Download, History, Pencil, Trash2, Eye, X, MoreVertical, Layers, ChevronDown, ChevronRight } from 'lucide-react';
 import { supabase, uploadProductImage } from '../lib/supabase';
-import { formatCurrency, generateId, exportToCSV, formatDate } from '../lib/utils';
+import { formatCurrency, generateId, exportToCSV, formatDate, useVisibilityReload } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/ui/Modal';
 import EmptyState from '../components/ui/EmptyState';
@@ -46,6 +46,7 @@ export default function Inventory() {
   const [variantsMap, setVariantsMap] = useState<Record<string, ProductVariant[]>>({});
   const [expandedVariantProduct, setExpandedVariantProduct] = useState<string | null>(null);
   const [editingVariants, setEditingVariants] = useState<(ProductVariant & { godown_id?: string })[]>([]);
+  const [editingPieces, setEditingPieces] = useState<Array<{ id: string; weight: string; godown_id: string; isNew: boolean; removed: boolean }>>([]);
 
   const [form, setForm] = useState({
     name: '', category: 'Astro Products' as Product['category'], unit: 'pcs',
@@ -65,6 +66,7 @@ export default function Inventory() {
   const [imagePreview, setImagePreview] = useState<string>('');
 
   useEffect(() => { loadData(); fetchCompanies().then(setCompanies); }, []);
+  useVisibilityReload(loadData);
   useEffect(() => {
     if (!openRowMenu) return;
     const handler = () => setOpenRowMenu(null);
@@ -134,6 +136,7 @@ export default function Inventory() {
     setOpeningStocks(stocks);
     const defaultCompany = companies.find(c => c.sort_order === 2) || companies[0];
     setEditingVariants([]);
+    setEditingPieces([]);
     setForm({
       name: '', category: 'Astro Products', unit: 'pcs',
       product_type: 'simple',
@@ -160,6 +163,14 @@ export default function Inventory() {
     godowns.forEach(g => { if (!stocksMap[g.id]) stocksMap[g.id] = '0'; });
     setEditGodownStocks(stocksMap);
     const pType: ProductType = (p.product_type as ProductType) || (p.is_gemstone ? 'gemstone' : 'simple');
+    if (pType === 'gemstone') {
+      const { data: uRows } = await supabase.from('product_units').select('id, weight, godown_id').eq('product_id', p.id).eq('status', 'in_stock').order('created_at');
+      setEditingPieces(((uRows || []) as Array<{ id: string; weight: number; godown_id: string | null }>).map(u => ({
+        id: u.id, weight: String(u.weight), godown_id: u.godown_id || (godowns[0]?.id || ''), isNew: false, removed: false,
+      })));
+    } else {
+      setEditingPieces([]);
+    }
     if (pType === 'variant') {
       const { data: vRows } = await supabase.from('product_variants').select('*').eq('product_id', p.id).eq('is_active', true).order('name');
       const { data: vStock } = await supabase.from('godown_stock').select('variant_id, godown_id, quantity').eq('product_id', p.id);
@@ -228,6 +239,26 @@ export default function Inventory() {
         const { error: productErr } = await supabase.from('products').update(basePayload).eq('id', editing.id);
         if (productErr) throw productErr;
 
+        // Save gemstone pieces inline
+        if (form.product_type === 'gemstone') {
+          const weightUnit: 'kg' | 'g' | 'carat' = form.weight_unit === 'carats' ? 'carat' : form.weight_unit === 'kg' ? 'kg' : 'g';
+          const toRemove = editingPieces.filter(p => !p.isNew && p.removed).map(p => p.id);
+          if (toRemove.length > 0) await supabase.from('product_units').delete().in('id', toRemove);
+          for (const p of editingPieces.filter(u => !u.isNew && !u.removed)) {
+            const w = parseFloat(p.weight);
+            if (Number.isFinite(w) && w > 0) {
+              await supabase.from('product_units').update({ weight: w, godown_id: p.godown_id }).eq('id', p.id);
+            }
+          }
+          const newPieces = editingPieces.filter(p => p.isNew && !p.removed && parseFloat(p.weight) > 0);
+          if (newPieces.length > 0) {
+            await supabase.from('product_units').insert(newPieces.map(p => ({
+              product_id: editing.id, weight: parseFloat(p.weight), weight_unit: weightUnit,
+              status: 'in_stock' as const, godown_id: p.godown_id || null,
+            })));
+          }
+        }
+
         // Save variants (upsert by id)
         if (form.product_type === 'variant') {
           for (const v of editingVariants) {
@@ -282,6 +313,18 @@ export default function Inventory() {
         const { data: newProduct, error: insertErr } = await supabase.from('products').insert(createPayload).select().maybeSingle();
         if (insertErr) throw insertErr;
         if (newProduct) {
+          // Save inline gemstone pieces for new product
+          if (form.product_type === 'gemstone') {
+            const weightUnit: 'kg' | 'g' | 'carat' = form.weight_unit === 'carats' ? 'carat' : form.weight_unit === 'kg' ? 'kg' : 'g';
+            const newPieces = editingPieces.filter(p => !p.removed && parseFloat(p.weight) > 0);
+            if (newPieces.length > 0) {
+              await supabase.from('product_units').insert(newPieces.map(p => ({
+                product_id: newProduct.id, weight: parseFloat(p.weight), weight_unit: weightUnit,
+                status: 'in_stock' as const, godown_id: p.godown_id || null,
+              })));
+            }
+          }
+
           // Save new variants
           if (form.product_type === 'variant' && editingVariants.length > 0) {
             const { data: insertedVariants } = await supabase.from('product_variants').insert(
@@ -935,7 +978,6 @@ export default function Inventory() {
                   <thead className="bg-neutral-50">
                     <tr>
                       <th className="table-header text-left">Name</th>
-                      <th className="table-header text-left w-28">SKU</th>
                       {isAdmin && <th className="table-header text-right w-24">Buy (₹)</th>}
                       <th className="table-header text-right w-24">Sell (₹)</th>
                       <th className="table-header text-right w-20">Stock</th>
@@ -947,7 +989,6 @@ export default function Inventory() {
                     {editingVariants.map((v, vi) => (
                       <tr key={v.id} className="border-t border-neutral-100">
                         <td className="px-2 py-1.5"><input value={v.name} onChange={e => setEditingVariants(vs => { const n=[...vs]; n[vi]={...n[vi],name:e.target.value}; return n; })} className="input text-xs py-1" placeholder='e.g. 4 inch' /></td>
-                        <td className="px-2 py-1.5"><input value={v.sku} onChange={e => setEditingVariants(vs => { const n=[...vs]; n[vi]={...n[vi],sku:e.target.value}; return n; })} className="input text-xs py-1 font-mono" /></td>
                         {isAdmin && <td className="px-2 py-1.5"><input type="number" value={v.purchase_price} onChange={e => setEditingVariants(vs => { const n=[...vs]; n[vi]={...n[vi],purchase_price:parseFloat(e.target.value)||0}; return n; })} className="input text-xs py-1 text-right" /></td>}
                         <td className="px-2 py-1.5"><input type="number" value={v.selling_price} onChange={e => setEditingVariants(vs => { const n=[...vs]; n[vi]={...n[vi],selling_price:parseFloat(e.target.value)||0}; return n; })} className="input text-xs py-1 text-right" /></td>
                         <td className="px-2 py-1.5"><input type="number" value={v.stock_quantity} onChange={e => setEditingVariants(vs => { const n=[...vs]; n[vi]={...n[vi],stock_quantity:parseFloat(e.target.value)||0}; return n; })} className="input text-xs py-1 text-right" /></td>
@@ -961,7 +1002,7 @@ export default function Inventory() {
                       </tr>
                     ))}
                     {editingVariants.length === 0 && (
-                      <tr><td colSpan={isAdmin ? 7 : 6} className="px-3 py-4 text-center text-xs text-neutral-400">No variants yet. Click "Add Variant" to create one.</td></tr>
+                      <tr><td colSpan={isAdmin ? 5 : 4} className="px-3 py-4 text-center text-xs text-neutral-400">No variants yet. Click "Add Variant" to create one.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -995,13 +1036,60 @@ export default function Inventory() {
             </div>
           )}
           {form.product_type === 'gemstone' && (
-            <div className="col-span-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
-              <p className="text-xs font-semibold text-amber-800 mb-0.5">How to add gemstone stock</p>
-              <p className="text-xs text-amber-700">
-                {editing
-                  ? 'To add pieces, close this dialog and click the Pieces button next to this product. Enter one weight per line.'
-                  : 'After saving, click the Pieces button next to this product to add individual pieces with their weights.'}
-              </p>
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="label mb-0">Pieces in Stock</label>
+                <button type="button" onClick={() => setEditingPieces(ps => [...ps, {
+                  id: `new-${Date.now()}`, weight: '', godown_id: godowns[0]?.id || '', isNew: true, removed: false,
+                }])} className="btn-ghost text-xs py-1">
+                  <Plus className="w-3 h-3" /> Add Piece
+                </button>
+              </div>
+              <div className="border border-neutral-200 rounded-lg overflow-hidden">
+                <table className="w-full">
+                  <thead className="bg-neutral-50">
+                    <tr>
+                      <th className="table-header text-right w-24">Weight ({form.weight_unit === 'carats' ? 'ct' : form.weight_unit === 'kg' ? 'kg' : 'g'})</th>
+                      <th className="table-header text-left">Warehouse</th>
+                      <th className="table-header w-8" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {editingPieces.filter(p => !p.removed).map((p, pi) => (
+                      <tr key={p.id} className="border-t border-neutral-100">
+                        <td className="px-2 py-1.5">
+                          <input type="number" step="0.001" min={0} value={p.weight}
+                            onChange={e => setEditingPieces(ps => { const n=[...ps]; const idx=ps.findIndex(x=>x.id===p.id); n[idx]={...n[idx],weight:e.target.value}; return n; })}
+                            className="input text-xs py-1 text-right font-mono" placeholder="0.00" />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <select value={p.godown_id} onChange={e => setEditingPieces(ps => { const n=[...ps]; const idx=ps.findIndex(x=>x.id===p.id); n[idx]={...n[idx],godown_id:e.target.value}; return n; })} className="input text-xs py-1">
+                            {godowns.length === 0 && <option value="">(no godowns)</option>}
+                            {godowns.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                          </select>
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <button type="button" onClick={() => {
+                            if (p.isNew) setEditingPieces(ps => ps.filter(x => x.id !== p.id));
+                            else setEditingPieces(ps => { const n=[...ps]; const idx=ps.findIndex(x=>x.id===p.id); n[idx]={...n[idx],removed:true}; return n; });
+                          }} className="text-neutral-400 hover:text-error-500">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {editingPieces.filter(p => !p.removed).length === 0 && (
+                      <tr><td colSpan={3} className="px-3 py-3 text-center text-xs text-neutral-400">No pieces yet. Click "Add Piece" to enter individual weights.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {editingPieces.filter(p => !p.removed && parseFloat(p.weight) > 0).length > 0 && (
+                <p className="text-[10px] text-neutral-500 mt-1">
+                  {editingPieces.filter(p => !p.removed && parseFloat(p.weight) > 0).length} piece(s) &bull;&nbsp;
+                  {editingPieces.filter(p => !p.removed && parseFloat(p.weight) > 0).reduce((s, p) => s + parseFloat(p.weight), 0).toFixed(3)} {form.weight_unit === 'carats' ? 'ct' : form.weight_unit === 'kg' ? 'kg' : 'g'} total
+                </p>
+              )}
             </div>
           )}
           <div className="col-span-2">
