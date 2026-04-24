@@ -54,6 +54,7 @@ interface ReceiveItem {
   ordered_qty: number;
   received_qty: string;
   is_gemstone?: boolean;
+  product_type?: ProductType;
   weight_unit?: string;
   piece_weights?: string;
 }
@@ -248,13 +249,15 @@ export default function Purchase() {
       const previouslyReceived = item.product_id ? (alreadyReceived[item.product_id] || 0) : 0;
       const remaining = Math.max(0, orderedQty - previouslyReceived);
       const prod = products.find(p => p.id === item.product_id);
+      const prodType: ProductType = (prod?.product_type as ProductType) || (prod?.is_gemstone ? 'gemstone' : 'simple');
       return {
         product_id: item.product_id || '',
         product_name: item.product_name,
         unit: item.unit,
         ordered_qty: orderedQty,
         received_qty: String(remaining),
-        is_gemstone: prod?.is_gemstone || false,
+        is_gemstone: prod?.is_gemstone || prodType === 'gemstone',
+        product_type: prodType,
         weight_unit: prod?.weight_unit || 'grams',
         piece_weights: '',
       };
@@ -280,7 +283,8 @@ export default function Purchase() {
 
     // For gemstone items: validate and create product_units rows.
     for (const item of receiveItems) {
-      if (!item.is_gemstone || !item.product_id || (parseFloat(item.received_qty) || 0) <= 0) continue;
+      const isGemReceive = item.is_gemstone || item.product_type === 'gemstone';
+      if (!isGemReceive || !item.product_id || (parseFloat(item.received_qty) || 0) <= 0) continue;
       const parsedWeights = (item.piece_weights || '')
         .split('\n')
         .map(w => Number(w.trim()))
