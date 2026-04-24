@@ -57,6 +57,7 @@ interface ReceiveItem {
   product_type?: ProductType;
   weight_unit?: string;
   piece_weights?: string;
+  variant_id?: string;
 }
 
 interface EntryItemRow {
@@ -260,6 +261,7 @@ export default function Purchase() {
         product_type: prodType,
         weight_unit: prod?.weight_unit || 'grams',
         piece_weights: '',
+        variant_id: (item as any).variant_id || undefined,
       };
     });
     setReceiveItems(loaded.length ? loaded : []);
@@ -319,6 +321,7 @@ export default function Purchase() {
         godown_id: receiveGodownId,
         quantity: parseFloat(i.received_qty) || 0,
         unit_price: products.find(p => p.id === i.product_id)?.purchase_price || 0,
+        variant_id: i.variant_id || null,
       }));
 
     if (stockItems.length > 0) {

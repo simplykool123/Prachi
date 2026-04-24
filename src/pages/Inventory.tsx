@@ -70,15 +70,19 @@ export default function Inventory() {
     const [productsRes, godownsRes, godownStockRes, unitsRes, variantsRes] = await Promise.all([
       supabase.from('products').select('*').eq('is_active', true).order('name', { ascending: true }),
       supabase.from('godowns').select('*').eq('is_active', true).order('name'),
-      supabase.from('godown_stock').select('product_id, quantity'),
+      supabase.from('godown_stock').select('product_id, variant_id, quantity'),
       supabase.from('product_units').select('*').order('created_at', { ascending: false }),
       supabase.from('product_variants').select('*').eq('is_active', true).order('name'),
     ]);
     const rawProducts = productsRes.data || [];
     const stockRows = godownStockRes.data || [];
     const stockTotals: Record<string, number> = {};
+    const variantStockTotals: Record<string, number> = {};
     for (const row of stockRows) {
       stockTotals[row.product_id] = (stockTotals[row.product_id] || 0) + (row.quantity || 0);
+      if (row.variant_id) {
+        variantStockTotals[row.variant_id] = (variantStockTotals[row.variant_id] || 0) + (row.quantity || 0);
+      }
     }
     const byProduct: Record<string, ProductUnit[]> = {};
     for (const unit of ((unitsRes.data || []) as ProductUnit[])) {
@@ -88,7 +92,7 @@ export default function Inventory() {
     const byVariant: Record<string, ProductVariant[]> = {};
     for (const v of ((variantsRes.data || []) as ProductVariant[])) {
       byVariant[v.product_id] = byVariant[v.product_id] || [];
-      byVariant[v.product_id].push(v);
+      byVariant[v.product_id].push({ ...v, stock_quantity: variantStockTotals[v.id] ?? v.stock_quantity });
     }
     const merged = rawProducts.map(p => {
       if (p.is_gemstone || p.product_type === 'gemstone') {
