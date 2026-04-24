@@ -23,13 +23,27 @@ interface ProductWithStock {
   selling_price: number;
   purchase_price: number;
   product_type: string;
+  is_gemstone: boolean;
+  weight_unit: string | null;
   total_quantity: number;
   godown_quantities: Record<string, number>;
   variants?: VariantStockRow[];
+  piece_count?: number;
+  total_weight_grams?: number;
+  pieces_by_godown?: Record<string, { count: number; weight: number }>;
 }
 
 interface MovementWithProduct extends StockMovement {
   products?: { name: string; sku: string };
+}
+
+interface GemPiece {
+  id: string;
+  product_id: string;
+  weight: number;
+  weight_unit: string;
+  godown_id: string | null;
+  status: string;
 }
 
 export default function GodownStockPage() {
@@ -37,9 +51,10 @@ export default function GodownStockPage() {
   const [activeTab, setActiveTab] = useState<string>('overall');
   const [godownStock, setGodownStock] = useState<GodownStock[]>([]);
   const [allStock, setAllStock] = useState<GodownStock[]>([]);
+  const [gemPieces, setGemPieces] = useState<GemPiece[]>([]);
   const [loading, setLoading] = useState(true);
   const [stockSearch, setStockSearch] = useState('');
-  const [expandedVariantProducts, setExpandedVariantProducts] = useState<Set<string>>(new Set());
+  const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set());
   const [drillProduct, setDrillProduct] = useState<ProductWithStock | null>(null);
   const [movements, setMovements] = useState<MovementWithProduct[]>([]);
   const [movementsLoading, setMovementsLoading] = useState(false);
@@ -53,23 +68,27 @@ export default function GodownStockPage() {
 
   const loadData = async () => {
     setLoading(true);
-    const [godownsRes, stockRes] = await Promise.all([
+    const [godownsRes, stockRes, piecesRes] = await Promise.all([
       supabase.from('godowns').select('*').eq('is_active', true).order('name'),
       supabase.from('godown_stock')
-        .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price, product_type), product_variants(id, name, sku, selling_price, purchase_price)')
+        .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price, product_type, is_gemstone, weight_unit), product_variants(id, name, sku, selling_price, purchase_price)')
         .gte('quantity', 0)
         .order('quantity', { ascending: false })
         .limit(1000),
+      supabase.from('product_units')
+        .select('id, product_id, weight, weight_unit, godown_id, status')
+        .eq('status', 'in_stock'),
     ]);
     setGodowns(godownsRes.data || []);
     setAllStock((stockRes.data || []) as GodownStock[]);
+    setGemPieces((piecesRes.data || []) as GemPiece[]);
     setLoading(false);
   };
 
   const loadGodownStock = async (godownId: string) => {
     const { data } = await supabase
       .from('godown_stock')
-      .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price, product_type), product_variants(id, name, sku, selling_price, purchase_price)')
+      .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price, product_type, is_gemstone, weight_unit), product_variants(id, name, sku, selling_price, purchase_price)')
       .eq('godown_id', godownId)
       .gte('quantity', 0)
       .order('quantity', { ascending: false });
@@ -77,7 +96,9 @@ export default function GodownStockPage() {
   };
 
   const openDrillDown = async (product: ProductWithStock) => {
-    if (product.product_type === 'variant') return;
+    if (product.product_type === 'variant' || product.is_gemstone) {
+      // For variants/gemstones handled by expand, but allow drill-down for movement history
+    }
     setDrillProduct(product);
     setMovementsLoading(true);
     const { data } = await supabase
@@ -90,8 +111,8 @@ export default function GodownStockPage() {
     setMovementsLoading(false);
   };
 
-  const toggleVariantExpand = (productId: string) => {
-    setExpandedVariantProducts(prev => {
+  const toggleExpand = (productId: string) => {
+    setExpandedProducts(prev => {
       const next = new Set(prev);
       if (next.has(productId)) next.delete(productId);
       else next.add(productId);
@@ -117,6 +138,8 @@ export default function GodownStockPage() {
           selling_price: p.selling_price,
           purchase_price: p.purchase_price,
           product_type: p.product_type || 'simple',
+          is_gemstone: p.is_gemstone || false,
+          weight_unit: p.weight_unit || null,
           total_quantity: 0,
           godown_quantities: {},
           variants: [],
@@ -126,7 +149,6 @@ export default function GodownStockPage() {
       const row = productMap[s.product_id];
 
       if (v && s.variant_id) {
-        // Variant stock row
         let variantRow = row.variants!.find(vr => vr.variant_id === s.variant_id);
         if (!variantRow) {
           variantRow = {
@@ -145,9 +167,27 @@ export default function GodownStockPage() {
         row.total_quantity += s.quantity;
         row.godown_quantities[s.godown_id] = (row.godown_quantities[s.godown_id] || 0) + s.quantity;
       } else {
-        // Simple/weight/gemstone stock row
         row.total_quantity += s.quantity;
         row.godown_quantities[s.godown_id] = (row.godown_quantities[s.godown_id] || 0) + s.quantity;
+      }
+    }
+
+    // Enrich gemstone products with piece data from product_units
+    for (const row of Object.values(productMap)) {
+      if (row.is_gemstone) {
+        const pieces = gemPieces.filter(pu => pu.product_id === row.product_id);
+        row.piece_count = pieces.length;
+        row.total_weight_grams = pieces.reduce((s, pu) => s + (Number(pu.weight) || 0), 0);
+        const byGodown: Record<string, { count: number; weight: number }> = {};
+        for (const pu of pieces) {
+          const gid = pu.godown_id || '_none';
+          if (!byGodown[gid]) byGodown[gid] = { count: 0, weight: 0 };
+          byGodown[gid].count++;
+          byGodown[gid].weight += Number(pu.weight) || 0;
+        }
+        row.pieces_by_godown = byGodown;
+        // Override total_quantity with actual piece count for gemstones
+        row.total_quantity = pieces.length;
       }
     }
 
@@ -155,21 +195,55 @@ export default function GodownStockPage() {
   };
 
   const buildGodownProducts = (stock: GodownStock[]): ProductWithStock[] => {
-    return stock.map(s => {
+    const productMap: Record<string, ProductWithStock> = {};
+    for (const s of stock) {
       const p = s.products as any;
-      return {
-        product_id: s.product_id,
-        product_name: p?.name || '',
-        sku: p?.sku || '',
-        unit: p?.unit || '',
-        low_stock_alert: p?.low_stock_alert || 0,
-        selling_price: p?.selling_price || 0,
-        purchase_price: p?.purchase_price || 0,
-        product_type: p?.product_type || 'simple',
-        total_quantity: s.quantity,
-        godown_quantities: { [s.godown_id]: s.quantity },
-      };
-    });
+      const v = (s as any).product_variants as any;
+      if (!p) continue;
+      const isGem = p.is_gemstone || false;
+      if (!productMap[s.product_id]) {
+        productMap[s.product_id] = {
+          product_id: s.product_id,
+          product_name: p.name || '',
+          sku: p.sku || '',
+          unit: p.unit || '',
+          low_stock_alert: p.low_stock_alert || 0,
+          selling_price: p.selling_price || 0,
+          purchase_price: p.purchase_price || 0,
+          product_type: p.product_type || 'simple',
+          is_gemstone: isGem,
+          weight_unit: p.weight_unit || null,
+          total_quantity: 0,
+          godown_quantities: {},
+          variants: [],
+        };
+      }
+      const row = productMap[s.product_id];
+      if (v && s.variant_id) {
+        let variantRow = row.variants!.find(vr => vr.variant_id === s.variant_id);
+        if (!variantRow) {
+          variantRow = { variant_id: s.variant_id, variant_name: v.name, variant_sku: v.sku, selling_price: v.selling_price, purchase_price: v.purchase_price, total_quantity: 0, godown_quantities: {} };
+          row.variants!.push(variantRow);
+        }
+        variantRow.total_quantity += s.quantity;
+        variantRow.godown_quantities[s.godown_id] = (variantRow.godown_quantities[s.godown_id] || 0) + s.quantity;
+        row.total_quantity += s.quantity;
+      } else {
+        row.total_quantity += s.quantity;
+      }
+      row.godown_quantities[s.godown_id] = (row.godown_quantities[s.godown_id] || 0) + s.quantity;
+    }
+    // Enrich gemstones
+    for (const row of Object.values(productMap)) {
+      if (row.is_gemstone) {
+        const godownId = activeTab !== 'overall' ? activeTab : undefined;
+        const pieces = gemPieces.filter(pu => pu.product_id === row.product_id && (!godownId || pu.godown_id === godownId));
+        row.piece_count = pieces.length;
+        row.total_weight_grams = pieces.reduce((s, pu) => s + (Number(pu.weight) || 0), 0);
+        row.total_quantity = pieces.length;
+      }
+    }
+    return Object.values(productMap);
   };
 
   const displayProducts = activeTab === 'overall'
@@ -322,7 +396,9 @@ export default function GodownStockPage() {
                 <tbody>
                   {filtered.map(p => {
                     const isVariant = p.product_type === 'variant' && (p.variants?.length || 0) > 0;
-                    const isExpanded = expandedVariantProducts.has(p.product_id);
+                    const isGem = p.is_gemstone;
+                    const isExpandable = isVariant || isGem;
+                    const isExpanded = expandedProducts.has(p.product_id);
                     const isLow = p.low_stock_alert > 0 && p.total_quantity <= p.low_stock_alert;
                     const isOut = p.total_quantity === 0;
                     const stockPct = p.low_stock_alert > 0 ? Math.min(100, (p.total_quantity / (p.low_stock_alert * 3)) * 100) : 80;
@@ -330,23 +406,24 @@ export default function GodownStockPage() {
                       ? (p.variants || []).reduce((s, v) => s + v.total_quantity * v.selling_price, 0)
                       : p.total_quantity * p.selling_price;
 
+                    // For gemstones: per-godown piece count from product_units
+                    const gemGodownPieces = isGem ? (p.pieces_by_godown || {}) : null;
+
                     return (
                       <>
                         <tr
                           key={p.product_id}
-                          className={`border-b border-neutral-50 transition-colors ${
-                            isVariant
-                              ? 'cursor-pointer hover:bg-blue-50/40'
-                              : 'cursor-pointer hover:bg-primary-50/40'
+                          className={`border-b border-neutral-50 transition-colors cursor-pointer ${
+                            isVariant ? 'hover:bg-blue-50/40' : isGem ? 'hover:bg-amber-50/30' : 'hover:bg-primary-50/40'
                           } ${isLow ? 'bg-warning-50/30' : ''}`}
-                          onClick={() => isVariant ? toggleVariantExpand(p.product_id) : openDrillDown(p)}
+                          onClick={() => isExpandable ? toggleExpand(p.product_id) : openDrillDown(p)}
                         >
                           <td className="table-cell">
                             <div className="flex items-center gap-2">
-                              {isVariant ? (
+                              {isExpandable ? (
                                 isExpanded
-                                  ? <ChevronDown className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                                  : <ChevronRight className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                                  ? <ChevronDown className={`w-3.5 h-3.5 shrink-0 ${isGem ? 'text-amber-500' : 'text-blue-500'}`} />
+                                  : <ChevronRight className={`w-3.5 h-3.5 shrink-0 ${isGem ? 'text-amber-500' : 'text-blue-500'}`} />
                               ) : (
                                 isLow && <AlertTriangle className="w-3.5 h-3.5 text-warning-500 shrink-0" />
                               )}
@@ -358,23 +435,49 @@ export default function GodownStockPage() {
                                   {p.variants!.length} variants
                                 </span>
                               )}
+                              {isGem && (
+                                <span className="text-[10px] font-medium text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
+                                  {p.piece_count} pcs
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="table-cell text-xs text-neutral-500 font-mono">{p.sku || '—'}</td>
                           <td className="table-cell text-right">
-                            <span className={`font-bold text-sm ${isOut ? 'text-error-600' : isLow ? 'text-warning-600' : 'text-neutral-900'}`}>
-                              {p.total_quantity}
-                            </span>
-                            {p.low_stock_alert > 0 && (
-                              <p className="text-[9px] text-neutral-400">min: {p.low_stock_alert}</p>
+                            {isGem ? (
+                              <div>
+                                <span className={`font-bold text-sm ${isOut ? 'text-error-600' : isLow ? 'text-warning-600' : 'text-neutral-900'}`}>
+                                  {p.piece_count} pcs
+                                </span>
+                                {(p.total_weight_grams || 0) > 0 && (
+                                  <p className="text-[10px] text-neutral-400">{p.total_weight_grams?.toFixed(0)}g total</p>
+                                )}
+                              </div>
+                            ) : (
+                              <div>
+                                <span className={`font-bold text-sm ${isOut ? 'text-error-600' : isLow ? 'text-warning-600' : 'text-neutral-900'}`}>
+                                  {p.total_quantity}
+                                </span>
+                                {p.low_stock_alert > 0 && (
+                                  <p className="text-[9px] text-neutral-400">min: {p.low_stock_alert}</p>
+                                )}
+                              </div>
                             )}
                           </td>
-                          <td className="table-cell text-xs text-neutral-500">{p.unit}</td>
+                          <td className="table-cell text-xs text-neutral-500">{isGem ? 'pcs' : p.unit}</td>
                           {activeTab === 'overall' && godowns.map(g => (
                             <td key={g.id} className="table-cell text-right text-xs text-neutral-600">
-                              <span className={p.godown_quantities[g.id] ? 'font-medium' : 'text-neutral-300'}>
-                                {p.godown_quantities[g.id] || 0}
-                              </span>
+                              {isGem ? (
+                                <div>
+                                  <span className={gemGodownPieces?.[g.id]?.count ? 'font-medium text-neutral-700' : 'text-neutral-300'}>
+                                    {gemGodownPieces?.[g.id]?.count || 0} pcs
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className={p.godown_quantities[g.id] ? 'font-medium' : 'text-neutral-300'}>
+                                  {p.godown_quantities[g.id] || 0}
+                                </span>
+                              )}
                             </td>
                           ))}
                           <td className="table-cell text-right text-xs font-medium text-neutral-600">
@@ -439,6 +542,32 @@ export default function GodownStockPage() {
                             </tr>
                           );
                         })}
+
+                        {/* Gemstone piece sub-rows */}
+                        {isGem && isExpanded && (() => {
+                          const pieces = gemPieces.filter(pu => pu.product_id === p.product_id);
+                          if (pieces.length === 0) return null;
+                          return pieces.map((pu, idx) => {
+                            const godownName = godowns.find(g => g.id === pu.godown_id)?.name || '—';
+                            return (
+                              <tr key={pu.id} className="border-b border-neutral-50 bg-amber-50/20 hover:bg-amber-50/40 transition-colors">
+                                <td className="table-cell" colSpan={2}>
+                                  <div className="flex items-center gap-2 pl-6">
+                                    <div className="w-px h-4 bg-amber-200 shrink-0" />
+                                    <span className="text-xs text-neutral-600">Piece #{idx + 1}</span>
+                                    <span className="text-xs text-neutral-400">{godownName}</span>
+                                  </div>
+                                </td>
+                                <td className="table-cell text-right">
+                                  <span className="text-xs font-semibold text-amber-700">{Number(pu.weight).toFixed(2)} {pu.weight_unit}</span>
+                                </td>
+                                <td className="table-cell text-xs text-neutral-400" colSpan={activeTab === 'overall' ? godowns.length + 4 : 4}>
+                                  <span className="badge bg-success-50 text-success-700 text-[10px]">In Stock</span>
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })()}
                       </>
                     );
                   })}
@@ -453,7 +582,7 @@ export default function GodownStockPage() {
     {drillProduct && (
       <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
         <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDrillProduct(null)} />
-        <div className="relative bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-3xl max-h-[85vh] flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
+        <div className="relative bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-100">
             <div>
               <h2 className="text-base font-bold text-neutral-900">{drillProduct.product_name}</h2>
@@ -465,20 +594,74 @@ export default function GodownStockPage() {
           </div>
 
           <div className="overflow-y-auto flex-1 p-5 space-y-4">
+            {/* Summary cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="card !p-3">
                 <p className="text-xs text-neutral-500 mb-1">Total Stock</p>
-                <p className="text-xl font-bold text-neutral-900">{drillProduct.total_quantity}</p>
-                <p className="text-[10px] text-neutral-400 mt-0.5">{drillProduct.unit}</p>
+                {drillProduct.is_gemstone ? (
+                  <>
+                    <p className="text-xl font-bold text-neutral-900">{drillProduct.piece_count} pcs</p>
+                    <p className="text-[10px] text-neutral-400 mt-0.5">{drillProduct.total_weight_grams?.toFixed(0)}g total weight</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xl font-bold text-neutral-900">{drillProduct.total_quantity}</p>
+                    <p className="text-[10px] text-neutral-400 mt-0.5">{drillProduct.unit}</p>
+                  </>
+                )}
               </div>
               {godowns.map(g => (
                 <div key={g.id} className="card !p-3">
                   <p className="text-xs text-neutral-500 mb-1 truncate">{g.name}</p>
-                  <p className="text-xl font-bold text-neutral-900">{drillProduct.godown_quantities[g.id] || 0}</p>
-                  <p className="text-[10px] text-neutral-400 mt-0.5">{drillProduct.unit}</p>
+                  {drillProduct.is_gemstone ? (
+                    <>
+                      <p className="text-xl font-bold text-neutral-900">{drillProduct.pieces_by_godown?.[g.id]?.count || 0} pcs</p>
+                      {(drillProduct.pieces_by_godown?.[g.id]?.weight || 0) > 0 && (
+                        <p className="text-[10px] text-neutral-400 mt-0.5">{drillProduct.pieces_by_godown?.[g.id]?.weight.toFixed(0)}g</p>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xl font-bold text-neutral-900">{drillProduct.godown_quantities[g.id] || 0}</p>
+                      <p className="text-[10px] text-neutral-400 mt-0.5">{drillProduct.unit}</p>
+                    </>
+                  )}
                 </div>
               ))}
             </div>
+
+            {/* Gemstone pieces list */}
+            {drillProduct.is_gemstone && (() => {
+              const dPieces = gemPieces.filter(pu => pu.product_id === drillProduct.product_id);
+              if (dPieces.length === 0) return null;
+              return (
+                <div>
+                  <h3 className="text-sm font-semibold text-neutral-800 mb-2">In-Stock Pieces ({dPieces.length})</h3>
+                  <div className="border border-neutral-100 rounded-lg overflow-hidden">
+                    <table className="w-full">
+                      <thead className="bg-neutral-50">
+                        <tr>
+                          <th className="table-header text-left">#</th>
+                          <th className="table-header text-left">Weight</th>
+                          <th className="table-header text-left">Godown</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dPieces.map((pu, idx) => (
+                          <tr key={pu.id} className="border-t border-neutral-50 hover:bg-neutral-50">
+                            <td className="table-cell text-xs text-neutral-500">#{idx + 1}</td>
+                            <td className="table-cell">
+                              <span className="text-sm font-semibold text-amber-700">{Number(pu.weight).toFixed(2)} {pu.weight_unit}</span>
+                            </td>
+                            <td className="table-cell text-xs text-neutral-500">{godowns.find(g => g.id === pu.godown_id)?.name || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
 
             <div>
               <h3 className="text-sm font-semibold text-neutral-800 mb-3">Movement History</h3>

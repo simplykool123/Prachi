@@ -47,6 +47,8 @@ export default function Inventory() {
   const [expandedVariantProduct, setExpandedVariantProduct] = useState<string | null>(null);
   const [editingVariants, setEditingVariants] = useState<ProductVariant[]>([]);
   const [selectedPieceIds, setSelectedPieceIds] = useState<Set<string>>(new Set());
+  const [editingPieceWeights, setEditingPieceWeights] = useState<Record<string, string>>({});
+  const [deletingPieceIds, setDeletingPieceIds] = useState<Set<string>>(new Set());
 
   const [form, setForm] = useState({
     name: '', category: 'Astro Products' as Product['category'], unit: 'pcs',
@@ -349,7 +351,38 @@ export default function Inventory() {
     setSelectedProduct(p);
     setStockForm({ type: 'in', quantity: '', notes: '', movement_label: 'purchase', godown_id: godowns[0]?.id || '', piece_weights: '' });
     setSelectedPieceIds(new Set());
+    setEditingPieceWeights({});
+    setDeletingPieceIds(new Set());
     setShowStockModal(true);
+  };
+
+  const handleSavePieceEdits = async () => {
+    const updates = Object.entries(editingPieceWeights).filter(([, w]) => w !== '');
+    const deletes = Array.from(deletingPieceIds);
+    try {
+      for (const [id, weightStr] of updates) {
+        if (deletingPieceIds.has(id)) continue;
+        const w = parseFloat(weightStr);
+        if (isNaN(w) || w <= 0) continue;
+        await supabase.from('product_units').update({ weight: w }).eq('id', id);
+      }
+      if (deletes.length > 0) {
+        await supabase.from('product_units').update({ status: 'removed', sold_at: new Date().toISOString(), sold_reference_type: 'manual_delete' }).in('id', deletes);
+        if (selectedProduct) {
+          await processStockMovement({
+            type: 'dispatch',
+            items: [{ product_id: selectedProduct.id, godown_id: stockForm.godown_id, quantity: deletes.length }],
+            reference_type: 'manual_stock_update',
+            notes: 'Piece removed manually',
+          });
+        }
+      }
+      setEditingPieceWeights({});
+      setDeletingPieceIds(new Set());
+      await loadData();
+    } catch (err) {
+      alert('Failed to save piece edits: ' + (err instanceof Error ? err.message : String(err)));
+    }
   };
 
   const openLedgerModal = async (p: Product) => {
@@ -642,6 +675,16 @@ export default function Inventory() {
                       <div className="flex items-center gap-2">
                         {isVariant ? (
                           <span className="text-xs text-neutral-500">{pVariants.length} variants</span>
+                        ) : p.is_gemstone ? (
+                          <div>
+                            <span className={`text-xs font-semibold ${p.stock_quantity <= 0 ? 'text-error-600' : p.stock_quantity <= p.low_stock_alert ? 'text-warning-600' : 'text-neutral-700'}`}>
+                              {p.stock_quantity} pcs
+                            </span>
+                            {(() => {
+                              const totalGrams = (productUnitsMap[p.id] || []).filter(u => u.status === 'in_stock').reduce((s, u) => s + (Number(u.weight) || 0), 0);
+                              return totalGrams > 0 ? <p className="text-[10px] text-neutral-400">{totalGrams.toFixed(0)}g</p> : null;
+                            })()}
+                          </div>
                         ) : (
                           <>
                             <div className="w-16 h-1.5 bg-neutral-100 rounded-full overflow-hidden">
@@ -1065,9 +1108,69 @@ export default function Inventory() {
             <label className="label">Notes / Reference</label>
             <input value={stockForm.notes} onChange={e => setStockForm(f => ({ ...f, notes: e.target.value }))} className="input" placeholder="Invoice #, supplier name, reason..." />
           </div>
+
+          {/* Edit existing in-stock pieces */}
+          {selectedProduct.is_gemstone && (() => {
+            const allPieces = (productUnitsMap[selectedProduct.id] || []).filter(u => u.status === 'in_stock');
+            if (allPieces.length === 0) return null;
+            const hasEdits = Object.keys(editingPieceWeights).some(id => editingPieceWeights[id] !== '') || deletingPieceIds.size > 0;
+            return (
+              <div className="border border-neutral-200 rounded-lg overflow-hidden">
+                <div className="flex items-center justify-between bg-neutral-50 px-3 py-2 border-b border-neutral-100">
+                  <p className="text-xs font-semibold text-neutral-700">Edit In-Stock Pieces ({allPieces.length})</p>
+                  {hasEdits && (
+                    <button type="button" onClick={handleSavePieceEdits} className="text-[10px] font-semibold text-primary-600 hover:underline">Save edits</button>
+                  )}
+                </div>
+                <div className="max-h-44 overflow-y-auto divide-y divide-neutral-50">
+                  {allPieces.map((u, idx) => {
+                    const isDeleting = deletingPieceIds.has(u.id);
+                    const editedWeight = editingPieceWeights[u.id];
+                    return (
+                      <div key={u.id} className={`flex items-center gap-2 px-3 py-1.5 transition-colors ${isDeleting ? 'bg-error-50 opacity-60' : 'hover:bg-neutral-50'}`}>
+                        <span className="text-[10px] text-neutral-400 w-6 shrink-0">#{idx + 1}</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          disabled={isDeleting}
+                          value={editedWeight !== undefined ? editedWeight : String(u.weight)}
+                          onChange={e => setEditingPieceWeights(prev => ({ ...prev, [u.id]: e.target.value }))}
+                          className="input text-xs py-1 flex-1 min-w-0"
+                        />
+                        <span className="text-[10px] text-neutral-400 shrink-0">{u.weight_unit}</span>
+                        <button
+                          type="button"
+                          onClick={() => setDeletingPieceIds(prev => {
+                            const next = new Set(prev);
+                            if (next.has(u.id)) next.delete(u.id); else next.add(u.id);
+                            return next;
+                          })}
+                          className={`text-[10px] px-1.5 py-0.5 rounded transition-colors shrink-0 ${isDeleting ? 'text-error-600 bg-error-100 hover:bg-error-200' : 'text-neutral-400 hover:text-error-600'}`}
+                          title={isDeleting ? 'Undo remove' : 'Mark for removal'}
+                        >
+                          {isDeleting ? 'Undo' : 'Del'}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+                {hasEdits && (
+                  <div className="px-3 py-2 bg-primary-50 border-t border-primary-100 text-[10px] text-primary-700">
+                    {deletingPieceIds.size > 0 && <span>{deletingPieceIds.size} piece(s) marked for removal. </span>}
+                    Click "Save edits" to apply changes.
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           <div className="bg-neutral-50 px-3 py-2 rounded-lg">
             <p className="text-xs text-neutral-500">
               Total stock: <strong>{selectedProduct.stock_quantity} {selectedProduct.is_gemstone ? 'pcs' : selectedProduct.unit}</strong>
+              {selectedProduct.is_gemstone && (() => {
+                const totalG = (productUnitsMap[selectedProduct.id] || []).filter(u => u.status === 'in_stock').reduce((s, u) => s + (Number(u.weight) || 0), 0);
+                return totalG > 0 ? <span className="text-neutral-400 ml-1">· {totalG.toFixed(0)}g total</span> : null;
+              })()}
             </p>
           </div>
         </div>
