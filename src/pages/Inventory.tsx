@@ -410,7 +410,7 @@ export default function Inventory() {
 
         if (['purchase', 'return'].includes(mvType)) {
           if (parsedWeights.length === 0) {
-            alert('Please enter one weight per line for gemstone pieces.');
+            alert(`No valid weights found.\n\nEntered text: "${stockForm.piece_weights}"\n\nPlease enter one number per line (e.g. 1250 or 2.5).`);
             return;
           }
           const weightUnit: 'kg' | 'g' | 'carat' =
@@ -1034,15 +1034,30 @@ export default function Inventory() {
           </div>
 
           {/* Gemstone: Purchase/Return — enter piece weights */}
-          {selectedProduct.is_gemstone && ['purchase', 'return'].includes(stockForm.movement_label) && (
-            <div>
-              <label className="label">
-                Piece Weights — one per line ({selectedProduct.weight_unit === 'carats' ? 'carats' : 'grams'})
-              </label>
-              <textarea value={stockForm.piece_weights} onChange={e => setStockForm(f => ({ ...f, piece_weights: e.target.value }))} className="input h-28 text-xs resize-none font-mono" placeholder={'1250\n2975\n2448'} />
-              <p className="text-[10px] text-neutral-400 mt-0.5">Each line = one piece. 3 lines = 3 pieces added to stock.</p>
-            </div>
-          )}
+          {selectedProduct.is_gemstone && ['purchase', 'return'].includes(stockForm.movement_label) && (() => {
+            const weightUnit = selectedProduct.weight_unit === 'carats' ? 'carats' : 'grams';
+            const parsed = stockForm.piece_weights.split('\n').map(w => Number(w.trim())).filter(w => Number.isFinite(w) && w > 0);
+            return (
+              <div>
+                <label className="label">
+                  Piece Weights — one per line ({weightUnit})
+                  {parsed.length > 0 && <span className="ml-1 text-primary-600 font-semibold">{parsed.length} piece{parsed.length > 1 ? 's' : ''} ready</span>}
+                </label>
+                <textarea
+                  value={stockForm.piece_weights}
+                  onChange={e => setStockForm(f => ({ ...f, piece_weights: e.target.value }))}
+                  className="input h-28 text-xs resize-none font-mono"
+                  placeholder={`Enter weights, one per line\ne.g.:\n1250\n975\n2448`}
+                  autoFocus
+                />
+                <p className="text-[10px] text-neutral-400 mt-0.5">
+                  {parsed.length > 0
+                    ? `${parsed.length} piece(s) will be added — total ${parsed.reduce((s, w) => s + w, 0).toFixed(2)} ${weightUnit}`
+                    : 'Each line = one piece. Type a weight and press Enter for each piece.'}
+                </p>
+              </div>
+            );
+          })()}
 
           {/* Gemstone: Sale — pick specific pieces from dropdown */}
           {selectedProduct.is_gemstone && stockForm.movement_label === 'sale' && (() => {
