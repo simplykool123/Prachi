@@ -440,7 +440,7 @@ export default function Inventory() {
     const isIn = ['purchase', 'return'].includes(mvType);
 
     try {
-      if (selectedProduct.is_gemstone) {
+      if (selectedProduct.is_gemstone || selectedProduct.product_type === 'gemstone') {
         const parsedWeights = stockForm.piece_weights
           .split('\n')
           .map(w => Number(w.trim()))
@@ -737,7 +737,7 @@ export default function Inventory() {
                               <div className={`h-full rounded-full ${bar.color}`} style={{ width: `${bar.pct}%` }} />
                             </div>
                             <span className={`text-xs font-medium ${p.stock_quantity <= 0 ? 'text-error-600' : p.stock_quantity <= p.low_stock_alert ? 'text-warning-600' : 'text-neutral-700'}`}>
-                              {p.stock_quantity}
+                              {pType === 'weight' ? `${Number(p.stock_quantity).toFixed(3)} ${p.unit}` : p.stock_quantity}
                             </span>
                           </>
                         )}
@@ -749,8 +749,8 @@ export default function Inventory() {
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
                         {pType !== 'variant' && (
-                          <button onClick={() => openStockModal(p)} title={p.is_gemstone ? 'Add / Remove Pieces' : 'Stock In/Out'} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-primary-50 hover:bg-primary-100 text-primary-600 text-[10px] font-semibold transition-colors">
-                            <ArrowUpDown className="w-3 h-3" /> {p.is_gemstone ? 'Pieces' : 'Stock'}
+                          <button onClick={() => openStockModal(p)} title={pType === 'gemstone' ? 'Add / Remove Pieces' : 'Stock In/Out'} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-primary-50 hover:bg-primary-100 text-primary-600 text-[10px] font-semibold transition-colors">
+                            <ArrowUpDown className="w-3 h-3" /> {pType === 'gemstone' ? 'Pieces' : 'Stock'}
                           </button>
                         )}
                         <button onClick={() => openLedgerModal(p)} title="Movement Ledger" className="p-1.5 rounded-lg hover:bg-neutral-100 text-neutral-400 hover:text-blue-600 transition-colors">

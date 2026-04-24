@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Package, ShoppingCart, FileText, BarChart2,
   Truck, BookOpen, Receipt, Zap, LogOut, Moon, RotateCcw,
   CalendarDays, CircleUser as UserCircle2, Settings,
-  CreditCard, PackageCheck, Pencil, X, CheckCircle, Eye, EyeOff, ArrowLeftRight, ChevronDown, ChevronRight
+  CreditCard, PackageCheck, Pencil, X, CheckCircle, Eye, EyeOff, ArrowLeftRight
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -17,9 +17,6 @@ interface SidebarProps {
 export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
   const { profile, isAdmin, canAccessFinance, canAccessSales, canAccessInventory, canAccessExpenses, signOut } = useAuth();
   const [unpaidInvoices, setUnpaidInvoices] = useState(0);
-  const [inventoryOpen, setInventoryOpen] = useState(
-    ['inventory', 'godown-stock', 'godown-transfer'].includes(activePage)
-  );
   const [showProfile, setShowProfile] = useState(false);
   const [profileName, setProfileName] = useState('');
   const [profilePwd, setProfilePwd] = useState('');
@@ -158,21 +155,9 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
               <SectionLabel label="Inventory" />
               <div className="space-y-0.5">
                 {isAdmin && <NavItem id="purchase" label="Purchases" icon={ShoppingCart} />}
-                <button
-                  onClick={() => setInventoryOpen(v => !v)}
-                  className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 text-left group ${['inventory', 'godown-stock', 'godown-transfer'].includes(activePage) ? 'bg-primary-50 text-primary-700' : 'text-neutral-500 hover:bg-orange-50 hover:text-primary-700'}`}
-                >
-                  <Package className={`w-3.5 h-3.5 shrink-0 ${['inventory', 'godown-stock', 'godown-transfer'].includes(activePage) ? 'text-primary-600' : 'text-neutral-400 group-hover:text-primary-600'}`} />
-                  <span className="truncate leading-none flex-1">Products</span>
-                  {inventoryOpen ? <ChevronDown className="w-3 h-3 shrink-0 text-neutral-400" /> : <ChevronRight className="w-3 h-3 shrink-0 text-neutral-400" />}
-                </button>
-                {inventoryOpen && (
-                  <div className="ml-3 pl-2 border-l border-neutral-200 space-y-0.5">
-                    <NavItem id="inventory" label="All Products" icon={Package} />
-                    <NavItem id="godown-stock" label="Stock View" icon={BarChart2} />
-                    <NavItem id="godown-transfer" label="Transfers" icon={ArrowLeftRight} />
-                  </div>
-                )}
+                <NavItem id="inventory" label="Products" icon={Package} />
+                <NavItem id="godown-stock" label="Stock" icon={BarChart2} />
+                <NavItem id="godown-transfer" label="Transfers" icon={ArrowLeftRight} />
               </div>
             </>
           )}

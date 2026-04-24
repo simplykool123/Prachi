@@ -349,6 +349,7 @@ export default function GodownStockPage() {
                   {filtered.map(p => {
                     const isVariant = p.product_type === 'variant' && (p.variants?.length || 0) > 0;
                     const isGemstone = p.is_gemstone || p.product_type === 'gemstone';
+                    const isWeight = p.product_type === 'weight';
                     const isExpanded = expandedVariantProducts.has(p.product_id);
                     const isLow = p.low_stock_alert > 0 && p.total_quantity <= p.low_stock_alert;
                     const isOut = p.total_quantity === 0;
@@ -401,6 +402,15 @@ export default function GodownStockPage() {
                                   <p className="text-[10px] text-neutral-500">{(p.total_weight_grams || 0).toFixed(2)} {wLabel}</p>
                                 )}
                               </>
+                            ) : isWeight ? (
+                              <>
+                                <span className={`font-bold text-sm ${isOut ? 'text-error-600' : isLow ? 'text-warning-600' : 'text-neutral-900'}`}>
+                                  {Number(p.total_quantity).toFixed(3)} {p.unit}
+                                </span>
+                                {p.low_stock_alert > 0 && (
+                                  <p className="text-[9px] text-neutral-400">min: {p.low_stock_alert}</p>
+                                )}
+                              </>
                             ) : (
                               <>
                                 <span className={`font-bold text-sm ${isOut ? 'text-error-600' : isLow ? 'text-warning-600' : 'text-neutral-900'}`}>
@@ -420,6 +430,10 @@ export default function GodownStockPage() {
                                   {p.pieces_by_godown?.[g.id]?.count
                                     ? `${p.pieces_by_godown[g.id].count} pcs`
                                     : '—'}
+                                </span>
+                              ) : isWeight ? (
+                                <span className={p.godown_quantities[g.id] ? 'font-medium' : 'text-neutral-300'}>
+                                  {p.godown_quantities[g.id] ? Number(p.godown_quantities[g.id]).toFixed(3) : '—'}
                                 </span>
                               ) : (
                                 <span className={p.godown_quantities[g.id] ? 'font-medium' : 'text-neutral-300'}>
