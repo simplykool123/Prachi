@@ -138,7 +138,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     return () => document.removeEventListener('mousedown', handler);
   }, [openRowMenu]);
 
-  const loadData = async () => {
+  async function loadData() {
     const [ordersRes, productsRes, customersRes, godownsData, variantsRes] = await Promise.all([
       supabase.from('sales_orders').select('*').order('created_at', { ascending: false }),
       supabase.from('products').select('id, name, unit, selling_price, stock_quantity, is_gemstone, weight_unit, low_stock_alert, product_type').eq('is_active', true).order('name'),

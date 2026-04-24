@@ -76,7 +76,7 @@ export default function DropShipments() {
   useEffect(() => { loadData(); }, []);
   useVisibilityReload(loadData);
 
-  const loadData = async () => {
+  async function loadData() {
     const [dsRes, supplierRes, customerRes, productRes] = await Promise.all([
       supabase.from('drop_shipments').select('*').order('created_at', { ascending: false }),
       supabase.from('suppliers').select('*').eq('is_active', true).order('name'),

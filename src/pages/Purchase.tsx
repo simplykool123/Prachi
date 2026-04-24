@@ -110,7 +110,7 @@ export default function Purchase() {
   useEffect(() => { loadData(); }, []);
   useVisibilityReload(loadData);
 
-  const loadData = async () => {
+  async function loadData() {
     const [entriesRes, suppliersRes, productsRes, godownsRes, variantsRes] = await Promise.all([
       supabase.from('purchase_entries').select('*').order('created_at', { ascending: false }),
       supabase.from('suppliers').select('*').eq('is_active', true).order('name'),

@@ -58,7 +58,7 @@ export default function GodownStockPage() {
     }
   }, [activeTab]);
 
-  const loadData = async () => {
+  async function loadData() {
     setLoading(true);
     const [godownsRes, stockRes, piecesRes] = await Promise.all([
       supabase.from('godowns').select('*').eq('is_active', true).order('name'),

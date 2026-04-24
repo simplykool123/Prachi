@@ -200,7 +200,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
   const [dcMap, setDcMap] = useState<Record<string, any>>({});
   const [dcIsB2bMap, setDcIsB2bMap] = useState<Record<string, boolean>>({});
 
-  const loadData = async () => {
+  async function loadData() {
     const [invRes, productsRes, customersRes, godownsData, soRes, dcRes] = await Promise.all([
       supabase.from('invoices')
         .select('id, invoice_number, invoice_date, due_date, customer_id, customer_name, customer_phone, customer_address, customer_address2, customer_city, customer_state, customer_pincode, subtotal, tax_amount, total_amount, paid_amount, outstanding_amount, courier_charges, discount_amount, status, payment_terms, notes, bank_name, account_number, ifsc_code, sales_order_id, delivery_challan_id, created_at')

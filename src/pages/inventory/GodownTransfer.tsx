@@ -90,7 +90,7 @@ export default function GodownTransfer() {
 
   useEffect(() => { loadData(); }, [dateRange]);
 
-  const loadData = async () => {
+  async function loadData() {
     setLoading(true);
     const [godownsRes, productsRes, variantsRes, transfersRes] = await Promise.all([
       supabase.from('godowns').select('*').eq('is_active', true).order('name'),

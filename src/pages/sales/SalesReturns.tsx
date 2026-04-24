@@ -65,7 +65,7 @@ export default function SalesReturns() {
 
   useEffect(() => { loadData(); }, [dateRange]);
 
-  const loadData = async () => {
+  async function loadData() {
     const [returnsRes, invoicesRes, productsRes] = await Promise.all([
       supabase.from('sales_returns').select('*')
         .gte('return_date', dateRange.from)
