@@ -43,59 +43,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    const initializeAuth = async () => {
-      const loadingTimeout = setTimeout(() => {
-        setIsAuthLoading(false);
-      }, 15000);
+    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log("Auth event:", event);
 
-      try {
-        const nextSession = await getSessionWithRetry();
-        setSession(nextSession);
-        setUser(nextSession?.user ?? null);
+      setSession(session);
+      setUser(session?.user ?? null);
 
-        if (nextSession?.user) {
-          try {
-            await fetchProfile(nextSession.user.id);
-          } catch {
-            setProfile(null);
-          }
-        } else {
-          setProfile(null);
-        }
-      } catch {
-        setSession(null);
-        setUser(null);
-        setProfile(null);
-      } finally {
-        clearTimeout(loadingTimeout);
-        setIsAuthLoading(false);
-      }
-    };
-
-    initializeAuth();
-
-    const { data: listener } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
-      if (event === 'INITIAL_SESSION') return;
-
-      if (event === 'SIGNED_OUT') {
-        setSession(null);
-        setUser(null);
-        setProfile(null);
-        setIsAuthLoading(false);
-        return;
-      }
-
-      if (event === 'SIGNED_IN') {
-        setIsAuthLoading(true);
-      }
-
-      setSession(nextSession);
-      setUser(nextSession?.user ?? null);
-
-      if (nextSession?.user) {
+      if (session?.user) {
         try {
-          await fetchProfile(nextSession.user.id);
-        } catch {
+          const profile = await fetchProfile(session.user.id);
+          setProfile(profile);
+        } catch (e) {
+          console.error("Profile error:", e);
           setProfile(null);
         }
       } else {
