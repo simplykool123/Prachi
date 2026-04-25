@@ -142,13 +142,13 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   async function loadData() {
     const [ordersRes, productsRes, customersRes, godownsData, variantsRes] = await Promise.all([
       supabase.from('sales_orders').select('*').order('created_at', { ascending: false }),
-      supabase.from('products').select('id, name, unit, selling_price, stock_quantity, is_gemstone, weight_unit, low_stock_alert, product_type').eq('is_active', true).order('name'),
+      supabase.from('products').select('id, name, unit, selling_price, stock_quantity, weight_unit, low_stock_alert, product_type').eq('is_active', true).order('name'),
       supabase.from('customers').select('id, name, phone, address, address2, city, state, pincode, balance, total_revenue').eq('is_active', true).order('name'),
       fetchGodowns(),
       supabase.from('product_variants').select('*').eq('is_active', true).order('name'),
     ]);
     setOrders(ordersRes.data || []);
-    setProducts(((productsRes.data || []) as Array<{ id: string; name: string; unit: string; selling_price: number; stock_quantity: number; is_gemstone?: boolean; weight_unit?: string; low_stock_alert?: number; product_type?: string }>).map(p => ({
+    setProducts(((productsRes.data || []) as Array<{ id: string; name: string; unit: string; selling_price: number; stock_quantity: number; weight_unit?: string; low_stock_alert?: number; product_type?: string }>).map(p => ({
       id: p.id,
       name: p.name,
       unit: p.unit,
@@ -161,7 +161,6 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       is_active: true,
       created_at: '',
       updated_at: '',
-      is_gemstone: !!p.is_gemstone,
       weight_unit: (p.weight_unit as 'grams' | 'carats' | 'kg' | undefined),
       product_type: (p.product_type as ProductType | undefined),
     })));
@@ -235,7 +234,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const loadUnitsForLine = async (lineIndex: number, productId: string, godownId: string) => {
     if (!productId || !godownId) return;
     const product = products.find(p => p.id === productId);
-    if (!product?.is_gemstone) return;
+    if (product?.product_type !== 'gemstone') return;
     const { data } = await supabase
       .from('product_units')
       .select('*')
@@ -247,7 +246,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   };
 
   const getProductType = (p: Product): ProductType =>
-    (p.product_type as ProductType) || (p.is_gemstone ? 'gemstone' : 'simple');
+    (p.product_type as ProductType) || 'simple';
 
   const handleProductSelect = useCallback(async (i: number, product: Product) => {
     const pType = getProductType(product);
@@ -284,7 +283,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       if (smartRate !== product.selling_price) {
         setItems(prev => {
           const next = [...prev];
-          next[i] = { ...next[i], unit_price: String(smartRate), total_price: product.is_gemstone ? 0 : smartRate };
+          next[i] = { ...next[i], unit_price: String(smartRate), total_price: product.product_type === 'gemstone' ? 0 : smartRate };
           return next;
         });
       }
@@ -387,7 +386,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           setItems(prev => {
             const next = [...prev];
             next[i] = { ...next[i], unit_price: String(smartRate) };
-            const isGem = !!products.find(p => p.id === next[i].product_id)?.is_gemstone;
+            const isGem = products.find(p => p.id === next[i].product_id)?.product_type === 'gemstone';
             if (isGem) {
               next[i].total_price = (next[i].gemstone_weight || 0) * smartRate;
             } else {
@@ -404,7 +403,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const getStockForItem = (item: LineItem, lineIndex: number): number | null => {
     if (!item.product_id) return null;
     const p = products.find(pp => pp.id === item.product_id);
-    if (p?.is_gemstone) {
+    if (p?.product_type === 'gemstone') {
       return lineUnits[lineIndex]?.length ?? null;
     }
     if (godownStockMap[item.product_id] !== undefined) {
@@ -458,7 +457,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     const missingGodown = itemsWithProduct.filter(i => !i.godown_id);
     const missingGemPieces = itemsWithProduct.filter(i => {
       const p = products.find(pp => pp.id === i.product_id);
-      return !!p?.is_gemstone && (i.product_unit_ids || []).length === 0;
+      return p?.product_type === 'gemstone' && (i.product_unit_ids || []).length === 0;
     });
     if (missingGodown.length > 0) {
       alert(`Please select a godown for every product line. ${missingGodown.length} line(s) have no godown assigned.`);
@@ -541,7 +540,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     const missingGodown = itemsWithProduct.filter(i => !i.godown_id);
     const missingGemPieces = itemsWithProduct.filter(i => {
       const p = products.find(pp => pp.id === i.product_id);
-      return !!p?.is_gemstone && (i.product_unit_ids || []).length === 0;
+      return p?.product_type === 'gemstone' && (i.product_unit_ids || []).length === 0;
     });
     if (missingGodown.length > 0) {
       alert(`Please select a godown for every product line. ${missingGodown.length} line(s) have no godown assigned.`);

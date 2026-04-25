@@ -53,7 +53,7 @@ export default function Inventory() {
     product_type: 'simple' as ProductType,
     purchase_price: '', selling_price: '', low_stock_alert: '5',
     description: '', sku: '', image_url: '',
-    direction: '', is_gemstone: false, weight_grams: '',
+    direction: '', weight_grams: '',
     total_weight: '', weight_unit: 'grams' as 'grams' | 'carats' | 'kg',
     low_stock_enabled: true,
     company_id: '',
@@ -146,7 +146,7 @@ export default function Inventory() {
       product_type: 'simple',
       purchase_price: '', selling_price: '', low_stock_alert: '5',
       description: '', sku: generateId('SKU'), image_url: '',
-      direction: '', is_gemstone: false, weight_grams: '',
+      direction: '', weight_grams: '',
       total_weight: '', weight_unit: 'grams',
       low_stock_enabled: true,
       company_id: defaultCompany?.id || '',
@@ -194,7 +194,7 @@ export default function Inventory() {
       purchase_price: String(p.purchase_price), selling_price: String(p.selling_price),
       low_stock_alert: String(p.low_stock_alert),
       description: p.description || '', sku: p.sku, image_url: p.image_url || '',
-      direction: p.direction || '', is_gemstone: p.is_gemstone || false,
+      direction: p.direction || '',
       weight_grams: p.weight_grams ? String(p.weight_grams) : '',
       total_weight: p.total_weight ? String(p.total_weight) : '',
       weight_unit: (p.weight_unit as 'grams' | 'carats' | 'kg') || 'grams',
@@ -231,7 +231,6 @@ export default function Inventory() {
       description: form.description,
       image_url: imageUrl || null,
       direction: form.direction || null,
-      is_gemstone: isGemstone,
       weight_grams: isGemstone && form.weight_grams ? parseFloat(form.weight_grams) || null : null,
       total_weight: totalW,
       weight_unit: (isGemstone || form.product_type === 'weight') ? form.weight_unit : null,
@@ -553,7 +552,7 @@ export default function Inventory() {
         });
       }
 
-      if (selectedProduct.is_gemstone && selectedProduct.total_weight) {
+      if (selectedProduct.product_type === 'gemstone' && selectedProduct.total_weight) {
         const updates: Record<string, any> = { updated_at: new Date().toISOString() };
         if (isIn) {
           updates.remaining_weight = (selectedProduct.remaining_weight || 0) + qty;
@@ -906,7 +905,7 @@ export default function Inventory() {
                     let unit = f.unit;
                     if (t.value === 'gemstone') unit = 'pcs';
                     else if (t.value === 'weight') unit = f.weight_unit === 'kg' ? 'kg' : f.weight_unit === 'carats' ? 'carats' : 'grams';
-                    return { ...f, product_type: t.value, is_gemstone: t.value === 'gemstone', unit };
+                    return { ...f, product_type: t.value, unit };
                   })}
                   className={`px-2 py-2 rounded-lg border text-left transition-colors ${form.product_type === t.value ? 'border-primary-500 bg-primary-50' : 'border-neutral-200 hover:border-neutral-300'}`}>
                   <p className={`text-xs font-semibold ${form.product_type === t.value ? 'text-primary-700' : 'text-neutral-700'}`}>{t.label}</p>
@@ -1111,7 +1110,7 @@ export default function Inventory() {
       <Modal
         isOpen={showStockModal && !!selectedProduct}
         onClose={() => setShowStockModal(false)}
-        title={selectedProduct?.is_gemstone ? `Piece Stock — ${selectedProduct?.name || ''}` : `Update Stock — ${selectedProduct?.name || ''}`}
+        title={selectedProduct?.product_type === 'gemstone' ? `Piece Stock — ${selectedProduct?.name || ''}` : `Update Stock — ${selectedProduct?.name || ''}`}
         size="sm"
         footer={
           <>
@@ -1136,7 +1135,7 @@ export default function Inventory() {
                 { value: 'purchase', label: 'Purchase (In)' },
                 { value: 'sale', label: 'Sale (Out)' },
                 { value: 'return', label: 'Return (In)' },
-                ...(selectedProduct?.is_gemstone ? [{ value: 'edit', label: 'Edit Pieces' }] : [{ value: 'adjustment', label: 'Adjustment' }]),
+                ...(selectedProduct?.product_type === 'gemstone' ? [{ value: 'edit', label: 'Edit Pieces' }] : [{ value: 'adjustment', label: 'Adjustment' }]),
               ].map(t => (
                 <button key={t.value} onClick={() => { setStockForm(f => ({ ...f, movement_label: t.value, type: ['purchase', 'return'].includes(t.value) ? 'in' : t.value === 'sale' ? 'out' : 'adjustment' })); setSelectedPieceIds(new Set()); setPieceEdits({}); setPieceDeletes(new Set()); }}
                   className={`py-1.5 px-3 rounded-lg text-xs font-medium transition-colors text-left ${stockForm.movement_label === t.value ? 'bg-primary-600 text-white' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}>
@@ -1145,7 +1144,7 @@ export default function Inventory() {
               ))}
             </div>
           </div>
-          {selectedProduct?.is_gemstone ? (() => {
+          {selectedProduct?.product_type === 'gemstone' ? (() => {
             const wLabel = selectedProduct.weight_unit === 'carats' ? 'ct' : 'g';
             const availablePieces = (productUnitsMap[selectedProduct.id] || []).filter(u =>
               u.status === 'in_stock' && (!stockForm.godown_id || !u.godown_id || u.godown_id === stockForm.godown_id)
@@ -1265,7 +1264,7 @@ export default function Inventory() {
           </div>
           {selectedProduct && (
             <div className="bg-neutral-50 px-3 py-2 rounded-lg">
-              {selectedProduct.is_gemstone ? (
+              {selectedProduct.product_type === 'gemstone' ? (
                 <p className="text-xs text-neutral-500">
                   In stock: <strong>{(productUnitsMap[selectedProduct.id] || []).filter(u => u.status === 'in_stock').length} pcs</strong>
                   {' · '}<strong>{(productUnitsMap[selectedProduct.id] || []).filter(u => u.status === 'in_stock').reduce((s, u) => s + (u.weight || 0), 0).toFixed(2)} {selectedProduct.weight_unit === 'carats' ? 'ct' : 'g'} total</strong>
@@ -1411,13 +1410,13 @@ export default function Inventory() {
               {/* Quick actions */}
               <div className="flex gap-2 pt-1">
                 <button onClick={() => { setViewProduct(null); openStockModal(viewProduct); }} className="btn-secondary text-xs flex-1 justify-center">
-                  <ArrowUpDown className="w-3 h-3" /> {viewProduct.is_gemstone ? 'Add / Remove Pieces' : 'Stock In/Out'}
+                  <ArrowUpDown className="w-3 h-3" /> {viewProduct.product_type === 'gemstone' ? 'Add / Remove Pieces' : 'Stock In/Out'}
                 </button>
                 <button onClick={() => { setViewProduct(null); openLedgerModal(viewProduct); }} className="btn-secondary text-xs flex-1 justify-center">
                   <History className="w-3 h-3" /> View Movements
                 </button>
               </div>
-              {viewProduct.is_gemstone && (
+              {viewProduct.product_type === 'gemstone' && (
                 <div className="col-span-3 bg-neutral-50 rounded-lg p-3">
                   <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mb-1">Available Pieces</p>
                   <div className="flex flex-wrap gap-1.5">

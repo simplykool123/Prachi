@@ -16,7 +16,6 @@ export interface Product {
   description?: string;
   image_url?: string;
   direction?: string;
-  is_gemstone?: boolean;
   weight_grams?: number;
   total_weight?: number;
   remaining_weight?: number;
