@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/ui/Modal';
 import EmptyState from '../components/ui/EmptyState';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import { processStockMovement } from '../services/stockService';
+import { processStockMovement, addGemPieces } from '../services/stockService';
 import { useDateRange } from '../contexts/DateRangeContext';
 import type { PurchaseEntry, PurchaseEntryItem, Product, ProductVariant, ProductType, Supplier, Godown } from '../types';
 
@@ -302,20 +302,20 @@ export default function Purchase() {
       }
       const prod = products.find(p => p.id === item.product_id);
       const wUnit: 'g' | 'kg' | 'carat' = prod?.weight_unit === 'carats' ? 'carat' : prod?.weight_unit === 'kg' ? 'kg' : 'g';
-      const rows = parsedWeights.map(weight => ({
-        product_id: item.product_id,
-        weight,
-        weight_unit: wUnit,
-        status: 'in_stock' as const,
-        godown_id: receiveGodownId,
-      }));
-      const { error: unitInsertErr } = await supabase.from('product_units').insert(rows);
-      if (unitInsertErr) throw unitInsertErr;
+      await addGemPieces({
+        productId: item.product_id,
+        pieces: parsedWeights.map(weight => ({ weight, weightUnit: wUnit, godownId: receiveGodownId })),
+        movementType: 'purchase',
+        referenceType: 'purchase_entry',
+        referenceId: receivingEntry.id,
+        referenceNumber: receivingEntry.entry_number,
+        notes: 'Goods received ' + receivingEntry.entry_number,
+      });
     }
 
-    // Post stock only for items with positive quantity in this batch.
+    // Post stock only for non-gemstone items (gemstone stock posted inside addGemPieces above).
     const stockItems = receiveItems
-      .filter(i => i.product_id && (parseFloat(i.received_qty) || 0) > 0)
+      .filter(i => i.product_id && (parseFloat(i.received_qty) || 0) > 0 && !i.is_gemstone)
       .map(i => ({
         product_id: i.product_id,
         godown_id: receiveGodownId,
@@ -432,20 +432,21 @@ export default function Purchase() {
             if (weights.length > 0) {
               const prod = products.find(p => p.id === item.product_id);
               const wUnit: 'g' | 'kg' | 'carat' = prod?.weight_unit === 'carats' ? 'carat' : 'g';
-              const rows = weights.map(weight => ({
-                product_id: item.product_id,
-                weight,
-                weight_unit: wUnit,
-                status: 'in_stock' as const,
-                godown_id: form.godown_id,
-              }));
-              await supabase.from('product_units').insert(rows);
+              await addGemPieces({
+                productId: item.product_id,
+                pieces: weights.map(weight => ({ weight, weightUnit: wUnit, godownId: form.godown_id })),
+                movementType: 'purchase',
+                referenceType: 'purchase_entry',
+                referenceId: entry.id,
+                referenceNumber: entryNumber,
+                notes: 'Purchase ' + entryNumber,
+              });
             }
           }
 
-          // Post stock for all items (gemstone: piece count; normal: qty)
+          // Post stock for non-gemstone items only (gemstone stock posted inside addGemPieces above)
           const stockItems = items
-            .filter(i => i.product_id && (parseFloat(i.quantity) || 0) > 0)
+            .filter(i => i.product_id && (parseFloat(i.quantity) || 0) > 0 && !i.is_gemstone)
             .map(i => ({
               product_id: i.product_id,
               godown_id: form.godown_id,

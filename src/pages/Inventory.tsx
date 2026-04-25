@@ -9,7 +9,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog';
 import type { Product, ProductUnit, ProductVariant, ProductType, StockMovement, Godown } from '../types';
 import { fetchCompanies } from '../lib/companiesService';
 import type { Company } from '../lib/companiesService';
-import { processStockMovement } from '../services/stockService';
+import { processStockMovement, addGemPieces, removeGemPieces, updateGemPieceMetadata, markGemPiecesSold, setVariantGodownStock } from '../services/stockService';
 
 const CATEGORIES = ['All', 'Astro Products', 'Vastu Items', 'Healing Items'] as const;
 const UNITS = ['pcs', 'grams', 'kg', 'sets', 'ml', 'liters'];
@@ -95,7 +95,7 @@ export default function Inventory() {
       byVariant[v.product_id].push({ ...v, stock_quantity: variantStockTotals[v.id] ?? v.stock_quantity });
     }
     const merged = rawProducts.map(p => {
-      if (p.is_gemstone || p.product_type === 'gemstone') {
+      if (p.product_type === 'gemstone') {
         const inStockCount = (byProduct[p.id] || []).filter(u => u.status === 'in_stock').length;
         return { ...p, stock_quantity: inStockCount };
       }
@@ -166,7 +166,7 @@ export default function Inventory() {
     (stocks || []).forEach(s => { stocksMap[s.godown_id] = String(s.quantity); });
     godowns.forEach(g => { if (!stocksMap[g.id]) stocksMap[g.id] = '0'; });
     setEditGodownStocks(stocksMap);
-    const pType: ProductType = (p.product_type as ProductType) || (p.is_gemstone ? 'gemstone' : 'simple');
+    const pType: ProductType = (p.product_type as ProductType) || 'simple';
     if (pType === 'gemstone') {
       const { data: uRows } = await supabase.from('product_units').select('id, weight, godown_id').eq('product_id', p.id).eq('status', 'in_stock').order('created_at');
       setEditingPieces(((uRows || []) as Array<{ id: string; weight: number; godown_id: string | null }>).map(u => ({
@@ -245,21 +245,25 @@ export default function Inventory() {
 
         // Save gemstone pieces inline
         if (form.product_type === 'gemstone') {
-          const weightUnit: 'kg' | 'g' | 'carat' = form.weight_unit === 'carats' ? 'carat' : form.weight_unit === 'kg' ? 'kg' : 'g';
+          const weightUnit: 'g' | 'kg' | 'carat' = form.weight_unit === 'carats' ? 'carat' : form.weight_unit === 'kg' ? 'kg' : 'g';
           const toRemove = editingPieces.filter(p => !p.isNew && p.removed).map(p => p.id);
-          if (toRemove.length > 0) await supabase.from('product_units').delete().in('id', toRemove);
+          if (toRemove.length > 0) {
+            await removeGemPieces({ pieceIds: toRemove, productId: editing.id, referenceType: 'stock_edit' });
+          }
           for (const p of editingPieces.filter(u => !u.isNew && !u.removed)) {
             const w = parseFloat(p.weight);
             if (Number.isFinite(w) && w > 0) {
-              await supabase.from('product_units').update({ weight: w, godown_id: p.godown_id }).eq('id', p.id);
+              await updateGemPieceMetadata({ pieceId: p.id, weight: w, godownId: p.godown_id || null });
             }
           }
           const newPieces = editingPieces.filter(p => p.isNew && !p.removed && parseFloat(p.weight) > 0);
           if (newPieces.length > 0) {
-            await supabase.from('product_units').insert(newPieces.map(p => ({
-              product_id: editing.id, weight: parseFloat(p.weight), weight_unit: weightUnit,
-              status: 'in_stock' as const, godown_id: p.godown_id || null,
-            })));
+            await addGemPieces({
+              productId: editing.id,
+              pieces: newPieces.map(p => ({ weight: parseFloat(p.weight), weightUnit, godownId: p.godown_id || null })),
+              movementType: 'purchase',
+              referenceType: 'stock_edit',
+            });
           }
         }
 
@@ -282,19 +286,14 @@ export default function Inventory() {
               if (ins?.id) variantId = ins.id;
             }
             if (v.godown_id && variantId) {
-              await supabase.from('godown_stock').delete().eq('product_id', editing.id).eq('variant_id', variantId);
-              if ((v.stock_quantity || 0) > 0) {
-                await supabase.from('godown_stock').insert({
-                  product_id: editing.id, variant_id: variantId, godown_id: v.godown_id, quantity: v.stock_quantity,
-                });
-              }
+              await setVariantGodownStock({
+                productId: editing.id,
+                variantId,
+                newGodownId: v.godown_id,
+                newQty: v.stock_quantity || 0,
+              });
             }
           }
-          // Resync products.stock_quantity from godown_stock since the above writes bypass the RPC
-          const { data: updatedRows } = await supabase
-            .from('godown_stock').select('quantity').eq('product_id', editing.id);
-          const newTotal = (updatedRows || []).reduce((s, r) => s + (r.quantity || 0), 0);
-          await supabase.from('products').update({ stock_quantity: newTotal, updated_at: new Date().toISOString() }).eq('id', editing.id);
         }
 
         if (form.product_type !== 'variant') {
@@ -324,13 +323,16 @@ export default function Inventory() {
         if (newProduct) {
           // Save inline gemstone pieces for new product
           if (form.product_type === 'gemstone') {
-            const weightUnit: 'kg' | 'g' | 'carat' = form.weight_unit === 'carats' ? 'carat' : form.weight_unit === 'kg' ? 'kg' : 'g';
+            const weightUnit: 'g' | 'kg' | 'carat' = form.weight_unit === 'carats' ? 'carat' : form.weight_unit === 'kg' ? 'kg' : 'g';
             const newPieces = editingPieces.filter(p => !p.removed && parseFloat(p.weight) > 0);
             if (newPieces.length > 0) {
-              await supabase.from('product_units').insert(newPieces.map(p => ({
-                product_id: newProduct.id, weight: parseFloat(p.weight), weight_unit: weightUnit,
-                status: 'in_stock' as const, godown_id: p.godown_id || null,
-              })));
+              await addGemPieces({
+                productId: newProduct.id,
+                pieces: newPieces.map(p => ({ weight: parseFloat(p.weight), weightUnit, godownId: p.godown_id || null })),
+                movementType: 'purchase',
+                referenceType: 'opening_stock',
+                referenceId: newProduct.id,
+              });
             }
           }
 
@@ -343,17 +345,17 @@ export default function Inventory() {
                 stock_quantity: v.stock_quantity,
               }))
             ).select('id, sku');
-            const stockRows: Array<{ product_id: string; variant_id: string; godown_id: string; quantity: number }> = [];
             for (const v of editingVariants) {
               if (!v.godown_id || !v.stock_quantity) continue;
               const match = (insertedVariants || []).find(r => r.sku === (v.sku || ''));
-              if (match) stockRows.push({ product_id: newProduct.id, variant_id: match.id, godown_id: v.godown_id, quantity: v.stock_quantity });
-            }
-            if (stockRows.length) {
-              await supabase.from('godown_stock').insert(stockRows);
-              // Resync products.stock_quantity since direct insert bypasses the RPC
-              const newTotal = stockRows.reduce((s, r) => s + (r.quantity || 0), 0);
-              await supabase.from('products').update({ stock_quantity: newTotal, updated_at: new Date().toISOString() }).eq('id', newProduct.id);
+              if (match) {
+                await setVariantGodownStock({
+                  productId: newProduct.id,
+                  variantId: match.id,
+                  newGodownId: v.godown_id,
+                  newQty: v.stock_quantity,
+                });
+              }
             }
           }
           if (form.product_type !== 'variant') {
@@ -454,7 +456,7 @@ export default function Inventory() {
     const isIn = ['purchase', 'return'].includes(mvType);
 
     try {
-      if (selectedProduct.is_gemstone || selectedProduct.product_type === 'gemstone') {
+      if (selectedProduct.product_type === 'gemstone') {
         const parsedWeights = stockForm.piece_weights
           .split('\n')
           .map(w => Number(w.trim()))
@@ -465,21 +467,13 @@ export default function Inventory() {
             alert('Please enter one weight per line for gemstone pieces.');
             return;
           }
-          const weightUnit: 'kg' | 'g' | 'carat' =
+          const weightUnit: 'g' | 'kg' | 'carat' =
             selectedProduct.weight_unit === 'carats' ? 'carat' : selectedProduct.weight_unit === 'kg' ? 'kg' : 'g';
-          const rows = parsedWeights.map(weight => ({
-            product_id: selectedProduct.id,
-            weight,
-            weight_unit: weightUnit,
-            status: 'in_stock' as const,
-            godown_id: godownId,
-          }));
-          const { error: insErr } = await supabase.from('product_units').insert(rows);
-          if (insErr) throw insErr;
-          await processStockMovement({
-            type: mvType === 'purchase' ? 'purchase' : 'return',
-            items: [{ product_id: selectedProduct.id, godown_id: godownId, quantity: parsedWeights.length }],
-            reference_type: 'manual_stock_update',
+          await addGemPieces({
+            productId: selectedProduct.id,
+            pieces: parsedWeights.map(weight => ({ weight, weightUnit, godownId: godownId })),
+            movementType: mvType === 'purchase' ? 'purchase' : 'return',
+            referenceType: 'manual_stock_update',
             notes: stockForm.notes,
           });
         } else if (mvType === 'sale') {
@@ -488,12 +482,8 @@ export default function Inventory() {
             alert('Select at least one piece to mark as sold.');
             return;
           }
-          const { error: upErr } = await supabase.from('product_units').update({
-            status: 'sold',
-            sold_at: new Date().toISOString(),
-            sold_reference_type: 'manual_stock_update',
-          }).in('id', toSell);
-          if (upErr) throw upErr;
+          // Mark sold in product_units then dispatch from godown_stock
+          await markGemPiecesSold({ pieceIds: toSell, referenceType: 'manual_stock_update', referenceId: selectedProduct.id });
           await processStockMovement({
             type: 'dispatch',
             items: [{ product_id: selectedProduct.id, godown_id: godownId, quantity: toSell.length }],
@@ -508,17 +498,14 @@ export default function Inventory() {
             return orig && Number.isFinite(num) && num > 0 && num !== orig.weight;
           });
           for (const [id, val] of editEntries) {
-            const { error: upErr } = await supabase.from('product_units').update({ weight: Number(val) }).eq('id', id);
-            if (upErr) throw upErr;
+            await updateGemPieceMetadata({ pieceId: id, weight: Number(val) });
           }
           const toRemove = Array.from(pieceDeletes);
           if (toRemove.length > 0) {
-            const { error: delErr } = await supabase.from('product_units').delete().in('id', toRemove);
-            if (delErr) throw delErr;
-            await processStockMovement({
-              type: 'adjustment',
-              items: [{ product_id: selectedProduct.id, godown_id: godownId, quantity: -toRemove.length }],
-              reference_type: 'manual_stock_update',
+            await removeGemPieces({
+              pieceIds: toRemove,
+              productId: selectedProduct.id,
+              referenceType: 'manual_stock_update',
               notes: `Removed ${toRemove.length} piece(s). ${stockForm.notes || ''}`.trim(),
             });
           }
@@ -693,7 +680,7 @@ export default function Inventory() {
             <tbody>
               {filtered.map(p => {
                 const bar = getStockBar(p);
-                const pType: ProductType = (p.product_type as ProductType) || (p.is_gemstone ? 'gemstone' : 'simple');
+                const pType: ProductType = (p.product_type as ProductType) || 'simple';
                 const isVariant = pType === 'variant';
                 const isExpanded = expandedVariantProduct === p.id;
                 const pVariants = variantsMap[p.id] || [];

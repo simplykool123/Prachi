@@ -11,6 +11,7 @@ import { useDateRange } from '../../contexts/DateRangeContext';
 import { createSalesOrder, createDeliveryChallan, cancelInvoice, cancelDeliveryChallan } from '../../services/documentFlowService';
 import { getSmartRate } from '../../lib/rateCardService';
 import { fetchGodowns, getGodownStockForProduct } from '../../services/godownService';
+import { markGemPiecesSold, revertGemPiecesSold } from '../../services/stockService';
 import { fetchCompanies } from '../../lib/companiesService';
 import type { Company } from '../../lib/companiesService';
 import SalesOrderPrint from './SalesOrderPrint';
@@ -524,12 +525,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       });
       const selectedUnitIds = itemsWithProduct.flatMap(i => i.product_unit_ids || []);
       if (selectedUnitIds.length > 0) {
-        await supabase.from('product_units').update({
-          status: 'sold',
-          sold_at: new Date().toISOString(),
-          sold_reference_type: 'sales_order',
-          sold_reference_id: soId,
-        }).in('id', selectedUnitIds);
+        await markGemPiecesSold({ pieceIds: selectedUnitIds, referenceType: 'sales_order', referenceId: soId });
       }
       setShowModal(false);
       loadData();
@@ -560,12 +556,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       return;
     }
     try {
-      await supabase.from('product_units').update({
-        status: 'in_stock',
-        sold_at: null,
-        sold_reference_type: null,
-        sold_reference_id: null,
-      }).eq('sold_reference_type', 'sales_order').eq('sold_reference_id', editOrder.id);
+      await revertGemPiecesSold({ referenceType: 'sales_order', referenceId: editOrder.id });
 
       const { error: updateErr } = await supabase.from('sales_orders').update({
         customer_id: form.customer_id || null,
@@ -620,12 +611,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       if (insertItemsErr) throw insertItemsErr;
       const selectedUnitIds = itemsWithProduct.flatMap(i => i.product_unit_ids || []);
       if (selectedUnitIds.length > 0) {
-        await supabase.from('product_units').update({
-          status: 'sold',
-          sold_at: new Date().toISOString(),
-          sold_reference_type: 'sales_order',
-          sold_reference_id: editOrder.id,
-        }).in('id', selectedUnitIds);
+        await markGemPiecesSold({ pieceIds: selectedUnitIds, referenceType: 'sales_order', referenceId: editOrder.id });
       }
       setShowModal(false);
       setEditOrder(null);
@@ -761,12 +747,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
         await supabase.from('delivery_challans').delete().eq('id', dc.id);
       }
 
-      await supabase.from('product_units').update({
-        status: 'in_stock',
-        sold_at: null,
-        sold_reference_type: null,
-        sold_reference_id: null,
-      }).eq('sold_reference_type', 'sales_order').eq('sold_reference_id', soId);
+      await revertGemPiecesSold({ referenceType: 'sales_order', referenceId: soId });
 
       const { error: soItemsErr } = await supabase.from('sales_order_items').delete().eq('sales_order_id', soId);
       if (soItemsErr) throw soItemsErr;
@@ -1393,12 +1374,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
         onClose={() => setCancelSOTarget(null)}
         onConfirm={async () => {
           if (!cancelSOTarget) return;
-          await supabase.from('product_units').update({
-            status: 'in_stock',
-            sold_at: null,
-            sold_reference_type: null,
-            sold_reference_id: null,
-          }).eq('sold_reference_type', 'sales_order').eq('sold_reference_id', cancelSOTarget.id);
+          await revertGemPiecesSold({ referenceType: 'sales_order', referenceId: cancelSOTarget.id });
           await supabase.from('sales_orders').update({ status: 'cancelled' }).eq('id', cancelSOTarget.id);
           setCancelSOTarget(null);
           loadData();
