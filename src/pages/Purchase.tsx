@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, FileText, Building2, ChevronDown, ChevronRight, X, Download, Warehouse, Truck, Pencil, XCircle } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, getSessionWithRetry, runQueryWithGlobalRecovery } from '../lib/supabase';
 import { formatCurrency, formatDate, nextDocNumber, exportToCSV, useVisibilityReload } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/ui/Modal';
@@ -111,20 +111,15 @@ export default function Purchase() {
   useVisibilityReload(loadData);
 
   async function loadData() {
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session) {
-      await new Promise(r => setTimeout(r, 500));
-      const { data: { session: retrySession } } = await supabase.auth.getSession();
-      if (!retrySession) return;
-    }
+    const session = await getSessionWithRetry();
+    if (!session) return;
 
     const [entriesRes, suppliersRes, productsRes, godownsRes, variantsRes] = await Promise.all([
-      supabase.from('purchase_entries').select('*').order('created_at', { ascending: false }),
-      supabase.from('suppliers').select('*').eq('is_active', true).order('name'),
-      supabase.from('products').select('id, name, unit, purchase_price, weight_unit, product_type').eq('is_active', true).order('name', { ascending: true }),
-      supabase.from('godowns').select('*').eq('is_active', true).order('name'),
-      supabase.from('product_variants').select('*').eq('is_active', true).order('name'),
+      runQueryWithGlobalRecovery(() => supabase.from('purchase_entries').select('*').order('created_at', { ascending: false }), { label: 'purchase-entries' }),
+      runQueryWithGlobalRecovery(() => supabase.from('suppliers').select('*').eq('is_active', true).order('name'), { label: 'purchase-suppliers' }),
+      runQueryWithGlobalRecovery(() => supabase.from('products').select('id, name, unit, purchase_price, weight_unit, product_type').eq('is_active', true).order('name', { ascending: true }), { label: 'purchase-products' }),
+      runQueryWithGlobalRecovery(() => supabase.from('godowns').select('*').eq('is_active', true).order('name'), { label: 'purchase-godowns' }),
+      runQueryWithGlobalRecovery(() => supabase.from('product_variants').select('*').eq('is_active', true).order('name'), { allowEmpty: true, label: 'purchase-variants' }),
     ]);
     if (entriesRes.error) {
       console.error(entriesRes.error);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Package, AlertTriangle, Search, TrendingUp, TrendingDown, RefreshCw, X, ChevronRight, ChevronDown } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { supabase, getSessionWithRetry, runQueryWithGlobalRecovery } from '../../lib/supabase';
 import { formatCurrency, formatDate, useVisibilityReload } from '../../lib/utils';
 import type { Godown, GodownStock, StockMovement } from '../../types';
 
@@ -59,24 +59,19 @@ export default function GodownStockPage() {
 
   async function loadData() {
     setLoading(true);
-    const { data: { session } } = await supabase.auth.getSession();
-
+    const session = await getSessionWithRetry();
     if (!session) {
-      await new Promise(r => setTimeout(r, 500));
-      const { data: { session: retrySession } } = await supabase.auth.getSession();
-      if (!retrySession) {
-        setLoading(false);
-        return;
-      }
+      setLoading(false);
+      return;
     }
 
     const [godownsRes, stockRes, piecesRes] = await Promise.all([
-      supabase.from('godowns').select('*').eq('is_active', true).order('name'),
-      supabase.from('godown_stock')
+      runQueryWithGlobalRecovery(() => supabase.from('godowns').select('*').eq('is_active', true).order('name'), { label: 'godown-stock-godowns' }),
+      runQueryWithGlobalRecovery(() => supabase.from('godown_stock')
         .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price, product_type, weight_unit), product_variants(id, name, sku, selling_price, purchase_price)')
         .gte('quantity', 0)
-        .order('quantity', { ascending: false }),
-      supabase.from('product_units').select('id, product_id, weight, weight_unit, godown_id, status').eq('status', 'in_stock'),
+        .order('quantity', { ascending: false }), { allowEmpty: true, label: 'godown-stock-rows' }),
+      runQueryWithGlobalRecovery(() => supabase.from('product_units').select('id, product_id, weight, weight_unit, godown_id, status').eq('status', 'in_stock'), { allowEmpty: true, label: 'godown-stock-pieces' }),
     ]);
     if (godownsRes.error) {
       console.error(godownsRes.error);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, ArrowUpDown, Search, BarChart2, AlertTriangle, ImagePlus, Download, History, Pencil, Trash2, Eye, X, MoreVertical, Layers, ChevronDown, ChevronRight } from 'lucide-react';
-import { supabase, uploadProductImage } from '../lib/supabase';
+import { supabase, uploadProductImage, getSessionWithRetry, runQueryWithGlobalRecovery } from '../lib/supabase';
 import { formatCurrency, generateId, exportToCSV, formatDate, useVisibilityReload } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/ui/Modal';
@@ -67,23 +67,18 @@ export default function Inventory() {
 
   async function loadData() {
     setLoading(true);
-    const { data: { session } } = await supabase.auth.getSession();
-
+    const session = await getSessionWithRetry();
     if (!session) {
-      await new Promise(r => setTimeout(r, 500));
-      const { data: { session: retrySession } } = await supabase.auth.getSession();
-      if (!retrySession) {
-        setLoading(false);
-        return;
-      }
+      setLoading(false);
+      return;
     }
 
     const [productsRes, godownsRes, godownStockRes, unitsRes, variantsRes] = await Promise.all([
-      supabase.from('products').select('*').eq('is_active', true).order('name', { ascending: true }),
-      supabase.from('godowns').select('*').eq('is_active', true).order('name'),
-      supabase.from('godown_stock').select('product_id, variant_id, quantity'),
-      supabase.from('product_units').select('*').order('created_at', { ascending: false }),
-      supabase.from('product_variants').select('*').eq('is_active', true).order('name'),
+      runQueryWithGlobalRecovery(() => supabase.from('products').select('*').eq('is_active', true).order('name', { ascending: true }), { label: 'inventory-products' }),
+      runQueryWithGlobalRecovery(() => supabase.from('godowns').select('*').eq('is_active', true).order('name'), { label: 'inventory-godowns' }),
+      runQueryWithGlobalRecovery(() => supabase.from('godown_stock').select('product_id, variant_id, quantity'), { label: 'inventory-godown-stock' }),
+      runQueryWithGlobalRecovery(() => supabase.from('product_units').select('*').order('created_at', { ascending: false }), { allowEmpty: true, label: 'inventory-product-units' }),
+      runQueryWithGlobalRecovery(() => supabase.from('product_variants').select('*').eq('is_active', true).order('name'), { allowEmpty: true, label: 'inventory-variants' }),
     ]);
     if (productsRes.error) {
       console.error(productsRes.error);

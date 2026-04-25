@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import type { User, Session } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
+import { supabase, getSessionWithRetry } from '../lib/supabase';
 import type { UserProfile } from '../types';
 
 export type UserRole = 'admin' | 'staff' | 'accountant' | 'user';
@@ -47,7 +47,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const initializeAuth = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const session = await getSessionWithRetry();
+        if (!session) {
+          console.log('No session → redirect login');
+        }
         setSession(session);
         setUser(session?.user ?? null);
         if (session?.user) {
@@ -72,26 +75,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initializeAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth event:', event);
       if (!initialized) return;
 
-  if (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
-  setSession(session);
-  setUser(session?.user ?? null);
-
-  if (session?.user) {
-    await fetchProfile(session.user.id);
-  }
-
-  // 🔥 Force data refresh
-  window.location.reload();
-
-  return;
+      if (event === 'SIGNED_OUT') {
+        window.location.reload();
+        return;
       }
 
-      if (event === 'SIGNED_OUT') {
-        setSession(null);
-        setUser(null);
-        setProfile(null);
+      if (event === 'TOKEN_REFRESHED') {
+        console.log('Token refreshed');
+      }
+
+      if (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
+        setSession(session);
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          await fetchProfile(session.user.id);
+        } else {
+          setProfile(null);
+        }
         return;
       }
 

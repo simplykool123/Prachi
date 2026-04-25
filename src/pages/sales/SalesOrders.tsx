@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, Search, FileText, ChevronDown, ChevronRight, Receipt, Truck, Download, Eye, Pencil, Trash2, Printer, Send, Warehouse, ArrowRight, XCircle, X, MoreVertical } from 'lucide-react';
 import { INDIA_STATES } from '../../lib/indiaData';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
-import { supabase } from '../../lib/supabase';
+import { supabase, getSessionWithRetry, runQueryWithGlobalRecovery } from '../../lib/supabase';
 import { formatCurrency, formatDate, generateId, nextDocNumber, exportToCSV, useVisibilityReload } from '../../lib/utils';
 import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
@@ -144,14 +144,22 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     return () => document.removeEventListener('mousedown', handler);
   }, [openRowMenu]);
 
+  const ensureSessionForApi = useCallback(async () => {
+    const session = await getSessionWithRetry();
+    if (!session) return null;
+    return session;
+  }, []);
+
   async function loadData() {
+    const session = await ensureSessionForApi();
+    if (!session) return;
     const [ordersRes, productsRes, customersRes, godownsData, variantsRes, stockRes] = await Promise.all([
-      supabase.from('sales_orders').select('*').order('created_at', { ascending: false }),
-      supabase.from('products').select('id, name, unit, selling_price, weight_unit, low_stock_alert, product_type').eq('is_active', true).order('name'),
-      supabase.from('customers').select('id, name, phone, address, address2, city, state, pincode, balance, total_revenue').eq('is_active', true).order('name'),
+      runQueryWithGlobalRecovery(() => supabase.from('sales_orders').select('*').order('created_at', { ascending: false }), { label: 'sales-orders-list' }),
+      runQueryWithGlobalRecovery(() => supabase.from('products').select('id, name, unit, selling_price, weight_unit, low_stock_alert, product_type').eq('is_active', true).order('name'), { label: 'sales-orders-products' }),
+      runQueryWithGlobalRecovery(() => supabase.from('customers').select('id, name, phone, address, address2, city, state, pincode, balance, total_revenue').eq('is_active', true).order('name'), { label: 'sales-orders-customers' }),
       fetchGodowns(),
-      supabase.from('product_variants').select('*').eq('is_active', true).order('name'),
-      supabase.from('godown_stock').select('product_id, variant_id, quantity'),
+      runQueryWithGlobalRecovery(() => supabase.from('product_variants').select('*').eq('is_active', true).order('name'), { allowEmpty: true, label: 'sales-orders-variants' }),
+      runQueryWithGlobalRecovery(() => supabase.from('godown_stock').select('product_id, variant_id, quantity'), { allowEmpty: true, label: 'sales-orders-stock' }),
     ]);
     setOrders(ordersRes.data || []);
     setProducts(((productsRes.data || []) as Array<{ id: string; name: string; unit: string; selling_price: number; weight_unit?: string; low_stock_alert?: number; product_type?: string }>).map(p => ({
@@ -211,12 +219,14 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
 
   const loadGodownStock = async (godownId: string, productIds: string[]) => {
     if (!godownId || productIds.length === 0) return;
+    const session = await ensureSessionForApi();
+    if (!session) return;
     const uniqueIds = [...new Set(productIds.filter(Boolean))];
-    const { data, error } = await supabase
+    const { data, error } = await runQueryWithGlobalRecovery(() => supabase
       .from('godown_stock')
       .select('product_id, variant_id, quantity')
       .eq('godown_id', godownId)
-      .in('product_id', uniqueIds);
+      .in('product_id', uniqueIds), { allowEmpty: true, label: 'sales-orders-godown-stock' });
     if (error || !data) return;
 
     const scoped: Record<string, number> = {};
@@ -240,6 +250,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     } else {
       next.add(id);
       if (!rowItems[id]) {
+        const session = await ensureSessionForApi();
+        if (!session) return;
         const { data } = await supabase.from('sales_order_items').select('*').eq('sales_order_id', id);
         setRowItems(prev => ({ ...prev, [id]: data || [] }));
       }
@@ -261,6 +273,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
 
   const loadUnitsForLine = async (lineIndex: number, productId: string, godownId: string) => {
     if (!productId || !godownId) return;
+    const session = await ensureSessionForApi();
+    if (!session) return;
     const product = products.find(p => p.id === productId);
     if (product?.product_type !== 'gemstone') return;
     const { data } = await supabase
@@ -290,6 +304,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       return next;
     });
 
+    const session = await ensureSessionForApi();
+    if (!session) return;
     const { data: stockRows } = await supabase
       .from('godown_stock')
       .select('godown_id, quantity')
@@ -321,7 +337,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       const qtyInput = getQtyRef(i).current;
       if (qtyInput) { qtyInput.focus(); qtyInput.select(); }
     }, 30);
-  }, [form.customer_id, godowns]);
+  }, [form.customer_id, godowns, ensureSessionForApi]);
 
   const handleQtyKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, i: number) => {
     if (e.key === 'Enter') {
@@ -389,6 +405,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
 
     // Auto-select best godown when product chosen (pick godown with most stock)
     if (field === 'product_id' && value) {
+      const session = await ensureSessionForApi();
+      if (!session) return;
       const { data: stockRows } = await supabase
         .from('godown_stock')
         .select('godown_id, quantity')
@@ -485,6 +503,11 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const handleSave = async () => {
     if (isSubmitting) return;
     console.log('[SalesOrders] submit start (create)');
+    const session = await ensureSessionForApi();
+    if (!session) {
+      toast.error('Session expired. Please sign in again.');
+      return;
+    }
     const itemsWithProduct = items.filter(i => i.product_name && i.product_id);
     if (itemsWithProduct.length === 0) {
       alert('At least one product line is required.');
@@ -579,6 +602,11 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
 
   const handleEdit = async () => {
     if (isSubmitting) return;
+    const session = await ensureSessionForApi();
+    if (!session) {
+      toast.error('Session expired. Please sign in again.');
+      return;
+    }
     if (!editOrder) return;
     const itemsWithProduct = items.filter(i => i.product_name && i.product_id);
     const missingGodown = itemsWithProduct.filter(i => !i.godown_id);
@@ -668,6 +696,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     } finally {
       setIsSubmitting(false);
     }
+    await handleSave();
   };
 
   const handleSubmit = async () => {
@@ -680,6 +709,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   };
 
   const openEdit = async (order: SalesOrder) => {
+    const session = await ensureSessionForApi();
+    if (!session) return;
     const { data: existingItems } = await supabase.from('sales_order_items').select('*').eq('sales_order_id', order.id);
     setEditOrder(order);
     setForm({
@@ -733,6 +764,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   };
 
   const openView = async (order: SalesOrder) => {
+    const session = await ensureSessionForApi();
+    if (!session) return;
     const { data: itemsData } = await supabase.from('sales_order_items').select('*').eq('sales_order_id', order.id);
     setViewOrder(order);
     setViewItems(itemsData || []);
@@ -740,6 +773,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   };
 
   const openSOPrint = async (order: SalesOrder, mode: 'normal' | 'b2b' = 'normal') => {
+    const session = await ensureSessionForApi();
+    if (!session) return;
     const { data: itemsData } = await supabase.from('sales_order_items').select('*').eq('sales_order_id', order.id);
     setPrintOrder(order);
     setPrintItems((itemsData || []) as SalesOrderItem[]);
@@ -757,6 +792,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
+    const session = await ensureSessionForApi();
+    if (!session) return;
     setDeleting(true);
     try {
       const soId = deleteTarget.id;
@@ -824,6 +861,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
 
   // Check what's linked before showing confirm
   const initiateDelete = async (o: SalesOrder) => {
+    const session = await ensureSessionForApi();
+    if (!session) return;
     const [invRes, dcRes] = await Promise.all([
       supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('sales_order_id', o.id),
       supabase.from('delivery_challans').select('id', { count: 'exact', head: true }).eq('sales_order_id', o.id),
@@ -853,6 +892,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   };
 
   const createChallanFromSO = async (order: SalesOrder) => {
+    const session = await ensureSessionForApi();
+    if (!session) return;
     setConverting(order.id);
     try {
       const challanNumber = await nextDocNumber('DC', supabase);
@@ -1437,6 +1478,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
         onClose={() => setCancelSOTarget(null)}
         onConfirm={async () => {
           if (!cancelSOTarget) return;
+          const session = await ensureSessionForApi();
+          if (!session) return;
           await revertGemPiecesSold({ referenceType: 'sales_order', referenceId: cancelSOTarget.id });
           await supabase.from('sales_orders').update({ status: 'cancelled' }).eq('id', cancelSOTarget.id);
           setCancelSOTarget(null);
