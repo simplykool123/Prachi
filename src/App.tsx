@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { useAuth } from './contexts/AuthContext';
 import { DateRangeProvider } from './contexts/DateRangeContext';
 import { ToastProvider } from './components/ui/Toast';
 import DateRangeBar from './components/layout/DateRangeBar';
@@ -118,12 +118,10 @@ function AppShell() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <DateRangeProvider>
-        <ToastProvider>
-          <AppShell />
-        </ToastProvider>
-      </DateRangeProvider>
-    </AuthProvider>
+    <DateRangeProvider>
+      <ToastProvider>
+        <AppShell />
+      </ToastProvider>
+    </DateRangeProvider>
   );
 }
