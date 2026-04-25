@@ -7,6 +7,7 @@ import { formatCurrency, formatDate, generateId, nextDocNumber, exportToCSV, use
 import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
+import { useToast } from '../../components/ui/Toast';
 import { useDateRange } from '../../contexts/DateRangeContext';
 import { createSalesOrder, createDeliveryChallan, cancelInvoice, cancelDeliveryChallan } from '../../services/documentFlowService';
 import { getSmartRate } from '../../lib/rateCardService';
@@ -42,6 +43,7 @@ interface SalesOrdersProps {
 
 export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const { dateRange } = useDateRange();
+  const toast = useToast();
   const [orders, setOrders] = useState<SalesOrder[]>([]);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -75,6 +77,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const [openRowMenu, setOpenRowMenu] = useState<string | null>(null);
   const [lineUnits, setLineUnits] = useState<Record<number, ProductUnit[]>>({});
   const [variantsMap, setVariantsMap] = useState<Record<string, ProductVariant[]>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const customerSelectRef = useRef<HTMLSelectElement>(null);
   const shipToNameRef = useRef<HTMLInputElement>(null);
@@ -480,6 +483,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const total = subtotal + (parseFloat(form.courier_charges) || 0) - (parseFloat(form.discount_amount) || 0);
 
   const handleSave = async () => {
+    if (isSubmitting) return;
+    console.log('[SalesOrders] submit start (create)');
     const itemsWithProduct = items.filter(i => i.product_name && i.product_id);
     if (itemsWithProduct.length === 0) {
       alert('At least one product line is required.');
@@ -506,11 +511,13 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       alert('Please enter a Ship To recipient name.');
       return;
     }
+    setIsSubmitting(true);
     try {
       const soNumber = await nextDocNumber('SO', supabase);
       const firstProdId = itemsWithProduct[0].product_id;
       const firstProd = products.find(p => p.id === firstProdId);
       const soCompanyId = (firstProd as unknown as { company_id?: string })?.company_id || null;
+      console.log('[SalesOrders] createSalesOrder API call started', { soNumber, lineCount: itemsWithProduct.length });
       const soId = await createSalesOrder({
         so_number: soNumber,
         customer_id: form.customer_id,
@@ -553,6 +560,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           };
         }),
       });
+      console.log('[SalesOrders] createSalesOrder API call completed', { soId });
       const selectedUnitIds = itemsWithProduct.flatMap(i => i.product_unit_ids || []);
       if (selectedUnitIds.length > 0) {
         await markGemPiecesSold({ pieceIds: selectedUnitIds, referenceType: 'sales_order', referenceId: soId });
@@ -561,11 +569,16 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       loadData();
     } catch (err) {
       console.error('Failed to create sales order:', err);
-      alert((err as Error).message || 'Failed to create sales order');
+      const message = err instanceof Error ? err.message : 'Failed to create sales order';
+      toast.error(message);
+      alert(message);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleEdit = async () => {
+    if (isSubmitting) return;
     if (!editOrder) return;
     const itemsWithProduct = items.filter(i => i.product_name && i.product_id);
     const missingGodown = itemsWithProduct.filter(i => !i.godown_id);
@@ -585,6 +598,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       alert('Please enter a Ship To recipient name.');
       return;
     }
+    setIsSubmitting(true);
     try {
       await revertGemPiecesSold({ referenceType: 'sales_order', referenceId: editOrder.id });
 
@@ -648,8 +662,21 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       loadData();
     } catch (err) {
       console.error('Failed to update sales order:', err);
-      alert(err instanceof Error ? err.message : 'Failed to update sales order');
+      const message = err instanceof Error ? err.message : 'Failed to update sales order';
+      toast.error(message);
+      alert(message);
+    } finally {
+      setIsSubmitting(false);
     }
+  };
+
+  const handleSubmit = async () => {
+    console.log('[SalesOrders] submit button click', { mode: editOrder ? 'edit' : 'create' });
+    if (editOrder) {
+      await handleEdit();
+      return;
+    }
+    await handleSave();
   };
 
   const openEdit = async (order: SalesOrder) => {
@@ -1057,7 +1084,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       </div>
 
       {/* keep saveActionRef in sync with current edit/save functions */}
-      {(() => { saveActionRef.current = editOrder ? handleEdit : handleSave; return null; })()}
+      {(() => { saveActionRef.current = handleSubmit; return null; })()}
 
       <Modal isOpen={showModal} onClose={() => { setShowModal(false); setEditOrder(null); }} title={editOrder ? `Edit Sales Order — ${editOrder.so_number}` : 'New Sales Order'} size="xl"
         footer={
@@ -1065,7 +1092,13 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
             <span className="text-[10px] text-neutral-400 select-none">Ctrl+Enter to save</span>
             <div className="flex gap-2">
               <button onClick={() => { setShowModal(false); setEditOrder(null); }} className="btn-secondary">Cancel</button>
-              <button onClick={editOrder ? handleEdit : handleSave} className="btn-primary">{editOrder ? 'Save Changes' : 'Create Order'}</button>
+              <button
+                onClick={handleSubmit}
+                disabled={isSubmitting}
+                className={`btn-primary ${isSubmitting ? 'opacity-60 cursor-not-allowed' : ''}`}
+              >
+                {isSubmitting ? (editOrder ? 'Saving...' : 'Creating...') : (editOrder ? 'Save Changes' : 'Create Order')}
+              </button>
             </div>
           </div>
         }>
