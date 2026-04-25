@@ -10,7 +10,7 @@ import EmptyState from '../../components/ui/EmptyState';
 import { useDateRange } from '../../contexts/DateRangeContext';
 import { createSalesOrder, createDeliveryChallan, cancelInvoice, cancelDeliveryChallan } from '../../services/documentFlowService';
 import { getSmartRate } from '../../lib/rateCardService';
-import { fetchGodowns, getGodownStockForProduct } from '../../services/godownService';
+import { fetchGodowns } from '../../services/godownService';
 import { markGemPiecesSold, revertGemPiecesSold } from '../../services/stockService';
 import { fetchCompanies } from '../../lib/companiesService';
 import type { Company } from '../../lib/companiesService';
@@ -49,6 +49,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [godowns, setGodowns] = useState<Godown[]>([]);
   const [godownStockMap, setGodownStockMap] = useState<Record<string, number>>({});
+  const [productTotalStockMap, setProductTotalStockMap] = useState<Record<string, number>>({});
+  const [variantTotalStockMap, setVariantTotalStockMap] = useState<Record<string, number>>({});
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [rowItems, setRowItems] = useState<Record<string, SalesOrderItem[]>>({});
   const [converting, setConverting] = useState<string | null>(null);
@@ -140,20 +142,20 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   }, [openRowMenu]);
 
   async function loadData() {
-    const [ordersRes, productsRes, customersRes, godownsData, variantsRes] = await Promise.all([
+    const [ordersRes, productsRes, customersRes, godownsData, variantsRes, stockRes] = await Promise.all([
       supabase.from('sales_orders').select('*').order('created_at', { ascending: false }),
-      supabase.from('products').select('id, name, unit, selling_price, stock_quantity, weight_unit, low_stock_alert, product_type').eq('is_active', true).order('name'),
+      supabase.from('products').select('id, name, unit, selling_price, weight_unit, low_stock_alert, product_type').eq('is_active', true).order('name'),
       supabase.from('customers').select('id, name, phone, address, address2, city, state, pincode, balance, total_revenue').eq('is_active', true).order('name'),
       fetchGodowns(),
       supabase.from('product_variants').select('*').eq('is_active', true).order('name'),
+      supabase.from('godown_stock').select('product_id, variant_id, quantity'),
     ]);
     setOrders(ordersRes.data || []);
-    setProducts(((productsRes.data || []) as Array<{ id: string; name: string; unit: string; selling_price: number; stock_quantity: number; weight_unit?: string; low_stock_alert?: number; product_type?: string }>).map(p => ({
+    setProducts(((productsRes.data || []) as Array<{ id: string; name: string; unit: string; selling_price: number; weight_unit?: string; low_stock_alert?: number; product_type?: string }>).map(p => ({
       id: p.id,
       name: p.name,
       unit: p.unit,
       selling_price: p.selling_price,
-      stock_quantity: p.stock_quantity,
       sku: '',
       category: 'Astro Products' as const,
       purchase_price: 0,
@@ -170,6 +172,17 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       byVariant[v.product_id].push(v);
     }
     setVariantsMap(byVariant);
+    const totalByProduct: Record<string, number> = {};
+    const totalByVariant: Record<string, number> = {};
+    for (const row of (stockRes.data || [])) {
+      const qty = row.quantity || 0;
+      totalByProduct[row.product_id] = (totalByProduct[row.product_id] || 0) + qty;
+      if (row.variant_id) {
+        totalByVariant[row.variant_id] = (totalByVariant[row.variant_id] || 0) + qty;
+      }
+    }
+    setProductTotalStockMap(totalByProduct);
+    setVariantTotalStockMap(totalByVariant);
     setCustomers(((customersRes.data || []) as Array<{ id: string; name: string; phone?: string; address?: string; address2?: string; city?: string; state?: string; pincode?: string; balance?: number; total_revenue?: number }>).map(c => ({
       id: c.id,
       name: c.name,
@@ -196,13 +209,25 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const loadGodownStock = async (godownId: string, productIds: string[]) => {
     if (!godownId || productIds.length === 0) return;
     const uniqueIds = [...new Set(productIds.filter(Boolean))];
-    const stockEntries = await Promise.all(
-      uniqueIds.map(async pid => {
-        const qty = await getGodownStockForProduct(pid, godownId);
-        return [pid, qty] as [string, number];
-      })
-    );
-    setGodownStockMap(Object.fromEntries(stockEntries));
+    const { data, error } = await supabase
+      .from('godown_stock')
+      .select('product_id, variant_id, quantity')
+      .eq('godown_id', godownId)
+      .in('product_id', uniqueIds);
+    if (error || !data) return;
+
+    const scoped: Record<string, number> = {};
+    for (const pid of uniqueIds) scoped[`${godownId}:${pid}:*`] = 0;
+    for (const row of data) {
+      const qty = row.quantity || 0;
+      const totalKey = `${godownId}:${row.product_id}:*`;
+      scoped[totalKey] = (scoped[totalKey] || 0) + qty;
+      if (row.variant_id) {
+        const variantKey = `${godownId}:${row.product_id}:${row.variant_id}`;
+        scoped[variantKey] = (scoped[variantKey] || 0) + qty;
+      }
+    }
+    setGodownStockMap(prev => ({ ...prev, ...scoped }));
   };
 
   const toggleExpand = async (id: string) => {
@@ -406,10 +431,16 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     if (p?.product_type === 'gemstone') {
       return lineUnits[lineIndex]?.length ?? null;
     }
-    if (godownStockMap[item.product_id] !== undefined) {
-      return godownStockMap[item.product_id];
+    if (!item.godown_id) return null;
+    const variantKey = item.variant_id ? `${item.godown_id}:${item.product_id}:${item.variant_id}` : '';
+    const totalKey = `${item.godown_id}:${item.product_id}:*`;
+    if (variantKey && godownStockMap[variantKey] !== undefined) {
+      return godownStockMap[variantKey];
     }
-    return p ? (p.stock_quantity ?? 0) : null;
+    if (godownStockMap[totalKey] !== undefined) {
+      return godownStockMap[totalKey];
+    }
+    return null;
   };
 
   const handleCustomerChange = (id: string) => {
@@ -1184,7 +1215,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                     const wLabel = prod?.weight_unit === 'carats' ? 'ct' : 'g';
                     const prodVariants = item.product_id ? (variantsMap[item.product_id] || []) : [];
                     const units = lineUnits[i] || [];
-                    const s = pType === 'gemstone' ? (lineUnits[i]?.length ?? undefined) : godownStockMap[item.product_id];
+                    const s = getStockForItem(item, i);
                     return (
                       <React.Fragment key={i}>
                       <tr className="border-t border-neutral-100">
@@ -1194,12 +1225,12 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                             value={item.product_id}
                             onSelect={p => handleProductSelect(i, p)}
                             inputRef={getProductRef(i)}
-                            godownStockMap={godownStockMap}
+                            godownStockMap={productTotalStockMap}
                           />
                           {pType === 'variant' && prodVariants.length > 0 && (
                             <select value={item.variant_id || ''} onChange={e => updateItem(i, 'variant_id', e.target.value)} className="input text-xs mt-1">
                               <option value="">-- Select Variant --</option>
-                              {prodVariants.map(v => <option key={v.id} value={v.id}>{v.name} (stock: {v.stock_quantity})</option>)}
+                              {prodVariants.map(v => <option key={v.id} value={v.id}>{v.name} (stock: {variantTotalStockMap[v.id] ?? 0})</option>)}
                             </select>
                           )}
                         </td>
@@ -1212,7 +1243,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                           }} className="input text-xs py-1">
                             {godowns.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                           </select>
-                          {item.product_id && s !== undefined && (
+                          {item.product_id && s !== null && (
                             <p className={`text-[10px] mt-0.5 text-right font-medium ${s === 0 ? 'text-error-600' : s <= (prod?.low_stock_alert||5) ? 'text-warning-600' : 'text-success-600'}`}>
                               {s} {pType === 'gemstone' ? 'pcs' : 'in stock'}
                             </p>
