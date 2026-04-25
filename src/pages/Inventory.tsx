@@ -290,6 +290,11 @@ export default function Inventory() {
               }
             }
           }
+          // Resync products.stock_quantity from godown_stock since the above writes bypass the RPC
+          const { data: updatedRows } = await supabase
+            .from('godown_stock').select('quantity').eq('product_id', editing.id);
+          const newTotal = (updatedRows || []).reduce((s, r) => s + (r.quantity || 0), 0);
+          await supabase.from('products').update({ stock_quantity: newTotal, updated_at: new Date().toISOString() }).eq('id', editing.id);
         }
 
         if (form.product_type !== 'variant') {
@@ -344,7 +349,12 @@ export default function Inventory() {
               const match = (insertedVariants || []).find(r => r.sku === (v.sku || ''));
               if (match) stockRows.push({ product_id: newProduct.id, variant_id: match.id, godown_id: v.godown_id, quantity: v.stock_quantity });
             }
-            if (stockRows.length) await supabase.from('godown_stock').insert(stockRows);
+            if (stockRows.length) {
+              await supabase.from('godown_stock').insert(stockRows);
+              // Resync products.stock_quantity since direct insert bypasses the RPC
+              const newTotal = stockRows.reduce((s, r) => s + (r.quantity || 0), 0);
+              await supabase.from('products').update({ stock_quantity: newTotal, updated_at: new Date().toISOString() }).eq('id', newProduct.id);
+            }
           }
           if (form.product_type !== 'variant') {
             const openingItems = Object.entries(openingStocks)

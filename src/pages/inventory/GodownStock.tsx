@@ -65,8 +65,7 @@ export default function GodownStockPage() {
       supabase.from('godown_stock')
         .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price, product_type, is_gemstone, weight_unit), product_variants(id, name, sku, selling_price, purchase_price)')
         .gte('quantity', 0)
-        .order('quantity', { ascending: false })
-        .limit(1000),
+        .order('quantity', { ascending: false }),
       supabase.from('product_units').select('id, product_id, weight, weight_unit, godown_id, status').eq('status', 'in_stock'),
     ]);
     setGodowns(godownsRes.data || []);
@@ -78,7 +77,7 @@ export default function GodownStockPage() {
   const loadGodownStock = async (godownId: string) => {
     const { data } = await supabase
       .from('godown_stock')
-      .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price, product_type), product_variants(id, name, sku, selling_price, purchase_price)')
+      .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price, product_type, is_gemstone, weight_unit), product_variants(id, name, sku, selling_price, purchase_price)')
       .eq('godown_id', godownId)
       .gte('quantity', 0)
       .order('quantity', { ascending: false });
@@ -108,7 +107,9 @@ export default function GodownStockPage() {
     });
   };
 
-  const buildOverallProducts = (stock: GodownStock[]): ProductWithStock[] => {
+  // Single aggregation function used for both Overall and per-godown views.
+  // When godownId is provided, gemstone piece counts are scoped to that godown.
+  const buildProducts = (stock: GodownStock[], godownId?: string): ProductWithStock[] => {
     const productMap: Record<string, ProductWithStock> = {};
 
     for (const s of stock) {
@@ -160,15 +161,19 @@ export default function GodownStockPage() {
       }
     }
 
-    // Enrich gemstone products with piece data from product_units
+    // Enrich gemstone products with piece data from product_units.
+    // When godownId is set, scope counts to that godown so per-godown totals match.
     for (const row of Object.values(productMap)) {
       if (!row.is_gemstone) continue;
-      const pieces = gemPieces.filter(u => u.product_id === row.product_id);
+      const allPieces = gemPieces.filter(u => u.product_id === row.product_id);
+      const pieces = godownId
+        ? allPieces.filter(u => u.godown_id === godownId)
+        : allPieces;
       row.piece_count = pieces.length;
       row.total_weight_grams = pieces.reduce((s: number, u: any) => s + (u.weight || 0), 0);
-      row.total_quantity = pieces.length; // override with actual piece count
+      row.total_quantity = pieces.length;
       const byGodown: Record<string, { count: number; weight: number }> = {};
-      for (const u of pieces) {
+      for (const u of allPieces) {
         const gid = u.godown_id || 'unassigned';
         if (!byGodown[gid]) byGodown[gid] = { count: 0, weight: 0 };
         byGodown[gid].count++;
@@ -180,27 +185,9 @@ export default function GodownStockPage() {
     return Object.values(productMap);
   };
 
-  const buildGodownProducts = (stock: GodownStock[]): ProductWithStock[] => {
-    return stock.map(s => {
-      const p = s.products as any;
-      return {
-        product_id: s.product_id,
-        product_name: p?.name || '',
-        sku: p?.sku || '',
-        unit: p?.unit || '',
-        low_stock_alert: p?.low_stock_alert || 0,
-        selling_price: p?.selling_price || 0,
-        purchase_price: p?.purchase_price || 0,
-        product_type: p?.product_type || 'simple',
-        total_quantity: s.quantity,
-        godown_quantities: { [s.godown_id]: s.quantity },
-      };
-    });
-  };
-
   const displayProducts = activeTab === 'overall'
-    ? buildOverallProducts(allStock)
-    : buildGodownProducts(godownStock);
+    ? buildProducts(allStock)
+    : buildProducts(godownStock, activeTab);
 
   const filtered = displayProducts.filter(p =>
     !stockSearch ||
