@@ -43,19 +43,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    let initialized = false;
-
     const initializeAuth = async () => {
       try {
-        const session = await getSessionWithRetry();
-        if (!session) {
-          console.log('No session → redirect login');
-        }
-        setSession(session);
-        setUser(session?.user ?? null);
-        if (session?.user) {
+        const nextSession = await getSessionWithRetry();
+        setSession(nextSession);
+        setUser(nextSession?.user ?? null);
+
+        if (nextSession?.user) {
           try {
-            await fetchProfile(session.user.id);
+            await fetchProfile(nextSession.user.id);
           } catch {
             setProfile(null);
           }
@@ -67,53 +63,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(null);
         setProfile(null);
       } finally {
-        initialized = true;
         setIsAuthLoading(false);
       }
     };
 
     initializeAuth();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth event:', event);
-      if (!initialized) return;
+    const { data: listener } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
+      if (event === 'INITIAL_SESSION') return;
 
       if (event === 'SIGNED_OUT') {
-        window.location.reload();
-        return;
-      }
-
-      if (event === 'TOKEN_REFRESHED') {
-        console.log('Token refreshed');
-      }
-
-      if (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
-        setSession(session);
-        setUser(session?.user ?? null);
-        if (session?.user) {
-          await fetchProfile(session.user.id);
-        } else {
-          setProfile(null);
-        }
+        setSession(null);
+        setUser(null);
+        setProfile(null);
+        setIsAuthLoading(false);
         return;
       }
 
       if (event === 'SIGNED_IN') {
         setIsAuthLoading(true);
-        setSession(session);
-        setUser(session?.user ?? null);
-        if (session?.user) {
-          try {
-            await fetchProfile(session.user.id);
-          } catch {
-            setProfile(null);
-          }
-        }
-        setIsAuthLoading(false);
       }
+
+      setSession(nextSession);
+      setUser(nextSession?.user ?? null);
+
+      if (nextSession?.user) {
+        try {
+          await fetchProfile(nextSession.user.id);
+        } catch {
+          setProfile(null);
+        }
+      } else {
+        setProfile(null);
+      }
+
+      setIsAuthLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      listener.subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = async (email: string, password: string) => {
@@ -122,7 +111,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signUp = async (username: string, password: string, role: UserRole) => {
-    const { data: { session: currentSession } } = await supabase.auth.getSession();
+    const currentSession = await getSessionWithRetry();
     if (!currentSession?.access_token) return { error: 'Not authenticated. Please reload.' };
 
     const normalizedUsername = username.trim().toLowerCase();
