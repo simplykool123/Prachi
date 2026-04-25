@@ -46,18 +46,16 @@ export const runQueryWithGlobalRecovery = async <T>(
   query: () => Promise<{ data: T | null; error: unknown }>,
   options?: { allowEmpty?: boolean; label?: string; reloadOnFail?: boolean }
 ): Promise<{ data: T | null; error: unknown }> => {
-  const allowEmpty = options?.allowEmpty ?? false;
   const reloadOnFail = options?.reloadOnFail ?? true;
   const label = options?.label || 'supabase-query';
 
-  const shouldRetry = (data: T | null, error: unknown) => {
+  const shouldRetry = (error: unknown) => {
     if (error && isAuthRelatedError(error)) return true;
-    if (!allowEmpty && (data == null || (Array.isArray(data) && data.length === 0))) return true;
     return false;
   };
 
   let result = await query();
-  if (!shouldRetry(result.data, result.error)) return result;
+  if (!shouldRetry(result.error)) return result;
 
   console.warn(`[${label}] query needs recovery`, { error: result.error, data: result.data });
   const session = await getSessionWithRetry();
@@ -67,7 +65,7 @@ export const runQueryWithGlobalRecovery = async <T>(
   }
 
   result = await query();
-  if (!shouldRetry(result.data, result.error)) return result;
+  if (!shouldRetry(result.error)) return result;
 
   console.error(`[${label}] retry failed`, { error: result.error, data: result.data });
   if (reloadOnFail) window.location.reload();

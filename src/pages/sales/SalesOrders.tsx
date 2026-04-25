@@ -154,9 +154,9 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     const session = await ensureSessionForApi();
     if (!session) return;
     const [ordersRes, productsRes, customersRes, godownsData, variantsRes, stockRes] = await Promise.all([
-      runQueryWithGlobalRecovery(() => supabase.from('sales_orders').select('*').order('created_at', { ascending: false }), { label: 'sales-orders-list' }),
-      runQueryWithGlobalRecovery(() => supabase.from('products').select('id, name, unit, selling_price, weight_unit, low_stock_alert, product_type').eq('is_active', true).order('name'), { label: 'sales-orders-products' }),
-      runQueryWithGlobalRecovery(() => supabase.from('customers').select('id, name, phone, address, address2, city, state, pincode, balance, total_revenue').eq('is_active', true).order('name'), { label: 'sales-orders-customers' }),
+      runQueryWithGlobalRecovery(() => supabase.from('sales_orders').select('*').order('created_at', { ascending: false }), { allowEmpty: true, label: 'sales-orders-list' }),
+      runQueryWithGlobalRecovery(() => supabase.from('products').select('id, name, unit, selling_price, weight_unit, low_stock_alert, product_type').eq('is_active', true).order('name'), { allowEmpty: true, label: 'sales-orders-products' }),
+      runQueryWithGlobalRecovery(() => supabase.from('customers').select('id, name, phone, address, address2, city, state, pincode, balance, total_revenue').eq('is_active', true).order('name'), { allowEmpty: true, label: 'sales-orders-customers' }),
       fetchGodowns(),
       runQueryWithGlobalRecovery(() => supabase.from('product_variants').select('*').eq('is_active', true).order('name'), { allowEmpty: true, label: 'sales-orders-variants' }),
       runQueryWithGlobalRecovery(() => supabase.from('godown_stock').select('product_id, variant_id, quantity'), { allowEmpty: true, label: 'sales-orders-stock' }),
@@ -697,7 +697,6 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     } finally {
       setIsSubmitting(false);
     }
-    await handleSave();
   };
 
   const handleSubmit = async () => {

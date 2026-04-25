@@ -111,7 +111,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signUp = async (username: string, password: string, role: UserRole) => {
-    const { data: { session: currentSession } } = await supabase.auth.getSession();
+    const currentSession = await getSessionWithRetry();
     if (!currentSession?.access_token) return { error: 'Not authenticated. Please reload.' };
 
     const normalizedUsername = username.trim().toLowerCase();

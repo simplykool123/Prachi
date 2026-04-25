@@ -222,81 +222,84 @@ export default function GodownTransfer() {
     }
 
     setSaving(true);
+    try {
+      const fromGodown = godowns.find(g => g.id === form.from_godown_id);
+      const toGodown = godowns.find(g => g.id === form.to_godown_id);
+      const transferNumber = await nextDocNumber('TRF', supabase);
 
-    const fromGodown = godowns.find(g => g.id === form.from_godown_id);
-    const toGodown = godowns.find(g => g.id === form.to_godown_id);
-    const transferNumber = await nextDocNumber('TRF', supabase);
+      const { data: transfer, error: transferError } = await supabase.from('godown_transfers').insert({
+        transfer_number: transferNumber,
+        transfer_date: form.transfer_date,
+        from_godown_id: form.from_godown_id,
+        from_godown_name: fromGodown?.name || '',
+        to_godown_id: form.to_godown_id,
+        to_godown_name: toGodown?.name || '',
+        reason: form.reason,
+        notes: form.notes,
+        status: 'completed',
+        total_items: validItems.length,
+      }).select().single();
+      if (transferError) throw transferError;
 
-    const { data: transfer, error: transferError } = await supabase.from('godown_transfers').insert({
-      transfer_number: transferNumber,
-      transfer_date: form.transfer_date,
-      from_godown_id: form.from_godown_id,
-      from_godown_name: fromGodown?.name || '',
-      to_godown_id: form.to_godown_id,
-      to_godown_name: toGodown?.name || '',
-      reason: form.reason,
-      notes: form.notes,
-      status: 'completed',
-      total_items: validItems.length,
-    }).select().single();
-    if (transferError) throw transferError;
+      if (transfer) {
+        const { error: itemsError } = await supabase.from('godown_transfer_items').insert(
+          validItems.map(item => {
+            const displayName = item.variant_name ? `${item.product_name} (${item.variant_name})` : item.product_name;
+            return {
+              transfer_id: transfer.id,
+              product_id: item.product_id,
+              product_name: displayName,
+              unit: item.unit,
+              quantity: parseFloat(item.quantity),
+              variant_id: item.variant_id || null,
+              variant_name: item.variant_name || null,
+            };
+          })
+        );
+        if (itemsError) throw itemsError;
 
-    if (transfer) {
-      const { error: itemsError } = await supabase.from('godown_transfer_items').insert(
-        validItems.map(item => {
-          const displayName = item.variant_name ? `${item.product_name} (${item.variant_name})` : item.product_name;
-          return {
-            transfer_id: transfer.id,
-            product_id: item.product_id,
-            product_name: displayName,
-            unit: item.unit,
-            quantity: parseFloat(item.quantity),
-            variant_id: item.variant_id || null,
-            variant_name: item.variant_name || null,
-          };
-        })
-      );
-      if (itemsError) throw itemsError;
+        const outItems = validItems.map(item => ({
+          product_id: item.product_id,
+          godown_id: form.from_godown_id,
+          quantity: parseFloat(item.quantity),
+          variant_id: item.variant_id || null,
+        }));
+        const inItems = validItems.map(item => ({
+          product_id: item.product_id,
+          godown_id: form.to_godown_id,
+          quantity: parseFloat(item.quantity),
+          variant_id: item.variant_id || null,
+        }));
 
-      const outItems = validItems.map(item => ({
-        product_id: item.product_id,
-        godown_id: form.from_godown_id,
-        quantity: parseFloat(item.quantity),
-        variant_id: item.variant_id || null,
-      }));
-      const inItems = validItems.map(item => ({
-        product_id: item.product_id,
-        godown_id: form.to_godown_id,
-        quantity: parseFloat(item.quantity),
-        variant_id: item.variant_id || null,
-      }));
+        await processStockMovement({
+          type: 'transfer_out',
+          items: outItems,
+          reference_type: 'godown_transfer',
+          reference_id: transfer.id,
+          reference_number: transferNumber,
+          notes: `Transfer out to ${toGodown?.name} (${transferNumber})`,
+        });
+        await processStockMovement({
+          type: 'transfer_in',
+          items: inItems,
+          reference_type: 'godown_transfer',
+          reference_id: transfer.id,
+          reference_number: transferNumber,
+          notes: `Transfer in from ${fromGodown?.name} (${transferNumber})`,
+        });
+      }
 
-      await processStockMovement({
-        type: 'transfer_out',
-        items: outItems,
-        reference_type: 'godown_transfer',
-        reference_id: transfer.id,
-        reference_number: transferNumber,
-        notes: `Transfer out to ${toGodown?.name} (${transferNumber})`,
-      });
-      await processStockMovement({
-        type: 'transfer_in',
-        items: inItems,
-        reference_type: 'godown_transfer',
-        reference_id: transfer.id,
-        reference_number: transferNumber,
-        notes: `Transfer in from ${fromGodown?.name} (${transferNumber})`,
-      });
+      setShowModal(false);
+      setForm({ transfer_date: new Date().toISOString().split('T')[0], from_godown_id: getDefaultGodownId(godowns), to_godown_id: '', reason: '', notes: '' });
+      setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', available_qty: 0 }]);
+      setGodownStockMap({});
+      loadData();
+    } catch (err) {
+      console.error('Failed to save transfer:', err);
+    } finally {
+      setSaving(false);
     }
-
-    setShowModal(false);
-    setForm({ transfer_date: new Date().toISOString().split('T')[0], from_godown_id: getDefaultGodownId(godowns), to_godown_id: '', reason: '', notes: '' });
-    setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', available_qty: 0 }]);
-    setGodownStockMap({});
-    setSaving(false);
-    loadData();
   };
-
   const handleExport = () => {
     exportToCSV(
       filtered.map(t => ({

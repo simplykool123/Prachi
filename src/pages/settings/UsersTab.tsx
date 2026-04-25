@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Plus, Pencil, CheckCircle, Save, Shield, User, Users as UsersIcon } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { supabase, getSessionWithRetry } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import type { UserRole } from '../../contexts/AuthContext';
 import type { UserProfile } from '../../types';
@@ -87,7 +87,7 @@ export default function UsersTab() {
         const { error } = await supabase.auth.updateUser({ password: newPwd });
         if (error) { setPwdError(error.message || 'Failed to update password.'); return; }
       } else {
-        const { data: { session } } = await supabase.auth.getSession();
+        const session = await getSessionWithRetry();
         if (!session?.access_token) { setPwdError('Not authenticated. Please reload.'); return; }
         const res = await fetch(
           `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-set-password`,
