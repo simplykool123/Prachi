@@ -697,6 +697,16 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     } finally {
       setIsSubmitting(false);
     }
+    await handleSave();
+  };
+
+  const handleSubmit = async () => {
+    console.log('[SalesOrders] submit button click', { mode: editOrder ? 'edit' : 'create' });
+    if (editOrder) {
+      await handleEdit();
+      return;
+    }
+    await handleSave();
   };
 
   const handleSubmit = async () => {
