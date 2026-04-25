@@ -992,7 +992,7 @@ export default function Purchase() {
                               </select>
                             )}
                           </td>
-                          <td className="px-3 py-2"><input value={item.unit} onChange={e => updateItem(i, 'unit', e.target.value)} className="input text-xs" /></td>
+                          <td className="px-3 py-2 text-xs text-neutral-600 font-medium">{item.unit || 'pcs'}</td>
                           <td className="px-3 py-2">
                             {pType === 'gemstone' ? (
                               <div className="text-right">
@@ -1012,7 +1012,7 @@ export default function Purchase() {
                                 <p className="text-[10px] text-neutral-400 text-right mt-0.5">{wLabel}</p>
                               </div>
                             ) : (
-                              <input type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} className="input text-xs text-right" />
+                              <input type="number" step="1" min="0" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} className="input text-xs text-right" />
                             )}
                           </td>
                           <td className="px-3 py-2">

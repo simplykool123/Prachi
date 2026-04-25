@@ -1230,7 +1230,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                               <p className="text-[10px] text-neutral-400 mt-0.5 text-right">pcs (auto)</p>
                             </>
                           ) : (
-                            <input ref={getQtyRef(i)} type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} onKeyDown={e => handleQtyKeyDown(e, i)} className="input text-xs text-right" />
+                            <input ref={getQtyRef(i)} type="number" step="1" min="0" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} onKeyDown={e => handleQtyKeyDown(e, i)} className="input text-xs text-right" />
                           )}
                         </td>
                         <td className="px-3 py-2 w-24">

@@ -223,7 +223,9 @@ export default function Inventory() {
     const isGemstone = form.product_type === 'gemstone';
     const totalW = isGemstone && form.total_weight ? parseFloat(form.total_weight) || 0 : 0;
     const basePayload = {
-      name: form.name, category: form.category, unit: form.unit, sku: form.sku,
+      name: form.name, category: form.category,
+      unit: (form.product_type === 'simple' || form.product_type === 'variant') ? 'pcs' : form.unit,
+      sku: form.sku,
       product_type: form.product_type,
       purchase_price: parseFloat(form.purchase_price) || 0,
       selling_price: parseFloat(form.selling_price) || 0,
@@ -864,24 +866,33 @@ export default function Inventory() {
                 <option>Healing Items</option>
               </select>
             </div>
-            {form.product_type === 'weight' || form.product_type === 'gemstone' ? (
+            {form.product_type === 'weight' ? (
               <div>
-                <label className="label">{form.product_type === 'weight' ? 'Weight Unit' : 'Piece Weight Unit'}</label>
+                <label className="label">Weight Unit</label>
                 <select value={form.weight_unit} onChange={e => {
                   const wu = e.target.value as 'grams' | 'carats' | 'kg';
-                  setForm(f => ({ ...f, weight_unit: wu, unit: form.product_type === 'weight' ? (wu === 'kg' ? 'kg' : wu === 'carats' ? 'carats' : 'grams') : 'pcs' }));
+                  setForm(f => ({ ...f, weight_unit: wu, unit: wu }));
                 }} className="input text-xs">
                   <option value="grams">Grams (g)</option>
                   <option value="kg">Kilograms (kg)</option>
                   <option value="carats">Carats (ct)</option>
                 </select>
               </div>
+            ) : form.product_type === 'gemstone' ? (
+              <div>
+                <label className="label">Piece Weight Unit</label>
+                <select value={form.weight_unit} onChange={e => {
+                  const wu = e.target.value as 'grams' | 'carats';
+                  setForm(f => ({ ...f, weight_unit: wu, unit: wu }));
+                }} className="input text-xs">
+                  <option value="grams">Grams (g)</option>
+                  <option value="carats">Carats (ct)</option>
+                </select>
+              </div>
             ) : (
               <div>
                 <label className="label">Unit</label>
-                <select value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} className="input text-xs">
-                  {UNITS.map(u => <option key={u}>{u}</option>)}
-                </select>
+                <div className="input text-xs bg-neutral-50 text-neutral-500 cursor-default select-none">pcs</div>
               </div>
             )}
             <div>
@@ -902,9 +913,10 @@ export default function Inventory() {
               ] as { value: ProductType; label: string; desc: string }[]).map(t => (
                 <button key={t.value} type="button"
                   onClick={() => setForm(f => {
-                    let unit = f.unit;
-                    if (t.value === 'gemstone') unit = 'pcs';
+                    let unit: string;
+                    if (t.value === 'gemstone') unit = f.weight_unit === 'carats' ? 'carats' : 'grams';
                     else if (t.value === 'weight') unit = f.weight_unit === 'kg' ? 'kg' : f.weight_unit === 'carats' ? 'carats' : 'grams';
+                    else unit = 'pcs';
                     return { ...f, product_type: t.value, unit };
                   })}
                   className={`px-2 py-2 rounded-lg border text-left transition-colors ${form.product_type === t.value ? 'border-primary-500 bg-primary-50' : 'border-neutral-200 hover:border-neutral-300'}`}>
