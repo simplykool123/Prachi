@@ -38,7 +38,6 @@ interface LineItem {
   quantity: string;
   unit_price: string;
   total_price: number;
-  is_gemstone?: boolean;
   product_type?: ProductType;
   weight_unit?: string;
   piece_weights?: string;
@@ -53,7 +52,6 @@ interface ReceiveItem {
   unit: string;
   ordered_qty: number;
   received_qty: string;
-  is_gemstone?: boolean;
   product_type?: ProductType;
   weight_unit?: string;
   piece_weights?: string;
@@ -116,7 +114,7 @@ export default function Purchase() {
     const [entriesRes, suppliersRes, productsRes, godownsRes, variantsRes] = await Promise.all([
       supabase.from('purchase_entries').select('*').order('created_at', { ascending: false }),
       supabase.from('suppliers').select('*').eq('is_active', true).order('name'),
-      supabase.from('products').select('id, name, unit, purchase_price, is_gemstone, weight_unit, product_type').eq('is_active', true).order('name', { ascending: true }),
+      supabase.from('products').select('id, name, unit, purchase_price, weight_unit, product_type').eq('is_active', true).order('name', { ascending: true }),
       supabase.from('godowns').select('*').eq('is_active', true).order('name'),
       supabase.from('product_variants').select('*').eq('is_active', true).order('name'),
     ]);
@@ -145,7 +143,7 @@ export default function Purchase() {
     raw.split('\n').map(w => parseFloat(w.trim())).filter(w => isFinite(w) && w > 0);
 
   const getPType = (p: Product): ProductType =>
-    (p.product_type as ProductType) || (p.is_gemstone ? 'gemstone' : 'simple');
+    (p.product_type as ProductType) || 'simple';
 
   const updateItem = (i: number, field: string, value: string) => {
     setItems(prev => {
@@ -158,7 +156,6 @@ export default function Purchase() {
           next[i].product_name = p.name;
           next[i].unit = p.unit;
           next[i].unit_price = String(p.purchase_price || '');
-          next[i].is_gemstone = pType === 'gemstone';
           next[i].product_type = pType;
           next[i].weight_unit = p.weight_unit || 'grams';
           next[i].piece_weights = '';
@@ -172,7 +169,7 @@ export default function Purchase() {
         const variant = (variantsMap[next[i].product_id] || []).find(v => v.id === value);
         if (variant) next[i].unit_price = String(variant.purchase_price || next[i].unit_price);
       }
-      const pType = next[i].product_type || (next[i].is_gemstone ? 'gemstone' : 'simple');
+      const pType = next[i].product_type || 'simple';
       if (pType === 'gemstone') {
         const weights = parsePieceWeights(next[i].piece_weights || '');
         const totalWeight = weights.reduce((s, w) => s + w, 0);
@@ -250,14 +247,13 @@ export default function Purchase() {
       const previouslyReceived = item.product_id ? (alreadyReceived[item.product_id] || 0) : 0;
       const remaining = Math.max(0, orderedQty - previouslyReceived);
       const prod = products.find(p => p.id === item.product_id);
-      const prodType: ProductType = (prod?.product_type as ProductType) || (prod?.is_gemstone ? 'gemstone' : 'simple');
+      const prodType: ProductType = (prod?.product_type as ProductType) || 'simple';
       return {
         product_id: item.product_id || '',
         product_name: item.product_name,
         unit: item.unit,
         ordered_qty: orderedQty,
         received_qty: String(remaining),
-        is_gemstone: prod?.is_gemstone || prodType === 'gemstone',
         product_type: prodType,
         weight_unit: prod?.weight_unit || 'grams',
         piece_weights: '',
@@ -285,7 +281,7 @@ export default function Purchase() {
 
     // For gemstone items: validate and create product_units rows.
     for (const item of receiveItems) {
-      const isGemReceive = item.is_gemstone || item.product_type === 'gemstone';
+      const isGemReceive = item.product_type === 'gemstone';
       if (!isGemReceive || !item.product_id || (parseFloat(item.received_qty) || 0) <= 0) continue;
       const parsedWeights = (item.piece_weights || '')
         .split('\n')
@@ -315,7 +311,7 @@ export default function Purchase() {
 
     // Post stock only for non-gemstone items (gemstone stock posted inside addGemPieces above).
     const stockItems = receiveItems
-      .filter(i => i.product_id && (parseFloat(i.received_qty) || 0) > 0 && !i.is_gemstone)
+      .filter(i => i.product_id && (parseFloat(i.received_qty) || 0) > 0 && i.product_type !== 'gemstone')
       .map(i => ({
         product_id: i.product_id,
         godown_id: receiveGodownId,
@@ -354,7 +350,7 @@ export default function Purchase() {
 
   const handleSave = async () => {
     // Validate gemstone lines have piece weights entered
-    for (const item of items.filter(i => i.product_name && i.is_gemstone)) {
+    for (const item of items.filter(i => i.product_name && i.product_type === 'gemstone')) {
       const weights = parsePieceWeights(item.piece_weights || '');
       if (weights.length === 0) {
         alert(`Please enter piece weights for gemstone product: ${item.product_name}`);
@@ -427,7 +423,7 @@ export default function Purchase() {
 
         // Create product_units for gemstone items and receive stock immediately
         if (form.godown_id) {
-          for (const item of items.filter(i => i.product_id && i.is_gemstone)) {
+          for (const item of items.filter(i => i.product_id && i.product_type === 'gemstone')) {
             const weights = parsePieceWeights(item.piece_weights || '');
             if (weights.length > 0) {
               const prod = products.find(p => p.id === item.product_id);
@@ -446,7 +442,7 @@ export default function Purchase() {
 
           // Post stock for non-gemstone items only (gemstone stock posted inside addGemPieces above)
           const stockItems = items
-            .filter(i => i.product_id && (parseFloat(i.quantity) || 0) > 0 && !i.is_gemstone)
+            .filter(i => i.product_id && (parseFloat(i.quantity) || 0) > 0 && i.product_type !== 'gemstone')
             .map(i => ({
               product_id: i.product_id,
               godown_id: form.godown_id,
@@ -971,7 +967,7 @@ export default function Purchase() {
                 </thead>
                 <tbody>
                   {items.map((item, i) => {
-                    const pType = item.product_type || (item.is_gemstone ? 'gemstone' : 'simple');
+                    const pType = item.product_type || 'simple';
                     const wLabel = item.weight_unit === 'carats' ? 'ct' : 'g';
                     const weights = pType === 'gemstone' ? parsePieceWeights(item.piece_weights || '') : [];
                     const totalWeight = weights.reduce((s, w) => s + w, 0);
@@ -996,7 +992,7 @@ export default function Purchase() {
                               </select>
                             )}
                           </td>
-                          <td className="px-3 py-2"><input value={item.unit} onChange={e => updateItem(i, 'unit', e.target.value)} className="input text-xs" /></td>
+                          <td className="px-3 py-2 text-xs text-neutral-600 font-medium">{item.unit || 'pcs'}</td>
                           <td className="px-3 py-2">
                             {pType === 'gemstone' ? (
                               <div className="text-right">
@@ -1016,7 +1012,7 @@ export default function Purchase() {
                                 <p className="text-[10px] text-neutral-400 text-right mt-0.5">{wLabel}</p>
                               </div>
                             ) : (
-                              <input type="number" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} className="input text-xs text-right" />
+                              <input type="number" step="1" min="0" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} className="input text-xs text-right" />
                             )}
                           </td>
                           <td className="px-3 py-2">
@@ -1104,7 +1100,7 @@ export default function Purchase() {
                       <tr className="border-t border-neutral-100">
                         <td className="px-3 py-2.5">
                           <p className="text-sm font-medium text-neutral-800">{item.product_name}</p>
-                          <p className="text-[10px] text-neutral-400">{item.unit}{item.is_gemstone && <span className="ml-1 text-primary-600 font-semibold">Gemstone</span>}</p>
+                          <p className="text-[10px] text-neutral-400">{item.unit}{item.product_type === 'gemstone' && <span className="ml-1 text-primary-600 font-semibold">Gemstone</span>}</p>
                         </td>
                         <td className="px-3 py-2.5 text-right text-sm text-neutral-600">{item.ordered_qty}</td>
                         <td className="px-3 py-2.5">
@@ -1125,7 +1121,7 @@ export default function Purchase() {
                           {remaining === 0 ? '✓ Complete' : remaining}
                         </td>
                       </tr>
-                      {item.is_gemstone && recv > 0 && (
+                      {item.product_type === 'gemstone' && recv > 0 && (
                         <tr key={`gem-${i}`} className="border-t border-neutral-50 bg-primary-50/40">
                           <td colSpan={4} className="px-3 py-2">
                             <label className="text-[10px] font-semibold text-primary-700 uppercase tracking-wider block mb-1">

@@ -23,7 +23,6 @@ interface ProductWithStock {
   selling_price: number;
   purchase_price: number;
   product_type: string;
-  is_gemstone?: boolean;
   weight_unit?: string;
   total_quantity: number;
   godown_quantities: Record<string, number>;
@@ -63,7 +62,7 @@ export default function GodownStockPage() {
     const [godownsRes, stockRes, piecesRes] = await Promise.all([
       supabase.from('godowns').select('*').eq('is_active', true).order('name'),
       supabase.from('godown_stock')
-        .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price, product_type, is_gemstone, weight_unit), product_variants(id, name, sku, selling_price, purchase_price)')
+        .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price, product_type, weight_unit), product_variants(id, name, sku, selling_price, purchase_price)')
         .gte('quantity', 0)
         .order('quantity', { ascending: false }),
       supabase.from('product_units').select('id, product_id, weight, weight_unit, godown_id, status').eq('status', 'in_stock'),
@@ -77,7 +76,7 @@ export default function GodownStockPage() {
   const loadGodownStock = async (godownId: string) => {
     const { data } = await supabase
       .from('godown_stock')
-      .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price, product_type, is_gemstone, weight_unit), product_variants(id, name, sku, selling_price, purchase_price)')
+      .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price, product_type, weight_unit), product_variants(id, name, sku, selling_price, purchase_price)')
       .eq('godown_id', godownId)
       .gte('quantity', 0)
       .order('quantity', { ascending: false });
@@ -127,7 +126,6 @@ export default function GodownStockPage() {
           selling_price: p.selling_price,
           purchase_price: p.purchase_price,
           product_type: p.product_type || 'simple',
-          is_gemstone: p.product_type === 'gemstone',
           weight_unit: p.weight_unit,
           total_quantity: 0,
           godown_quantities: {},
@@ -164,7 +162,7 @@ export default function GodownStockPage() {
     // Enrich gemstone products with piece data from product_units.
     // When godownId is set, scope counts to that godown so per-godown totals match.
     for (const row of Object.values(productMap)) {
-      if (!row.is_gemstone) continue;
+      if (row.product_type !== 'gemstone') continue;
       const allPieces = gemPieces.filter(u => u.product_id === row.product_id);
       const pieces = godownId
         ? allPieces.filter(u => u.godown_id === godownId)

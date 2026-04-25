@@ -148,7 +148,7 @@ export default function CRM() {
   };
 
   const loadProducts = async () => {
-    const { data } = await supabase.from('products').select('id, name, direction, is_gemstone, selling_price, unit').eq('is_active', true).order('name');
+    const { data } = await supabase.from('products').select('id, name, direction, product_type, selling_price, unit').eq('is_active', true).order('name');
     setProducts((data || []) as unknown as Product[]);
   };
 
