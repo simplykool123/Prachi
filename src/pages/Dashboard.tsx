@@ -60,6 +60,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
 
   const loadDashboardData = async () => {
     setLoading(true);
+    try {
     const today = toLocalDateStr(new Date());
     const { from: fromDate, to: toDate } = dateRange;
 
@@ -86,6 +87,12 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         .limit(6),
     ]);
 
+    // Log any query errors to help diagnose load failures
+    const queryErrors = { followupRes, todayApptRes, dispatchRes, invoicesRes, recentRes, lowStockRes, ordersRes, paymentsRes, challansRes, deliveriesRes };
+    Object.entries(queryErrors).forEach(([key, res]) => {
+      if ((res as any).error) console.error(`[Dashboard] ${key} error:`, (res as any).error);
+    });
+
     setFollowupsToday((followupRes.data || []) as Customer[]);
     setTodayAppts((todayApptRes.data || []) as Appointment[]);
     setPendingDispatches(dispatchRes.count || 0);
@@ -110,6 +117,10 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     setUpcomingDeliveries(deliveriesRes.data || []);
 
     setLoading(false);
+    } catch (err) {
+      console.error('[Dashboard] loadDashboardData crashed:', err);
+      setLoading(false);
+    }
   };
 
   const getStatusColor = (status: string) => {
