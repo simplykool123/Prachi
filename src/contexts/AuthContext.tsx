@@ -44,6 +44,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const initializeAuth = async () => {
+      const loadingTimeout = setTimeout(() => {
+        setIsAuthLoading(false);
+      }, 15000);
+
       try {
         const nextSession = await getSessionWithRetry();
         setSession(nextSession);
@@ -63,6 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(null);
         setProfile(null);
       } finally {
+        clearTimeout(loadingTimeout);
         setIsAuthLoading(false);
       }
     };

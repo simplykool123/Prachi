@@ -67,8 +67,14 @@ export default function Inventory() {
 
   async function loadData() {
     setLoading(true);
-    const session = await getSessionWithRetry();
+    let session = await getSessionWithRetry();
     if (!session) {
+      console.log("Session missing, retrying...");
+      await new Promise(r => setTimeout(r, 300));
+      session = await getSessionWithRetry();
+    }
+    if (!session) {
+      console.error("Session failed after retry");
       setLoading(false);
       return;
     }

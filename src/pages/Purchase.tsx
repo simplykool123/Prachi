@@ -111,8 +111,16 @@ export default function Purchase() {
   useVisibilityReload(loadData);
 
   async function loadData() {
-    const session = await getSessionWithRetry();
-    if (!session) return;
+    let session = await getSessionWithRetry();
+    if (!session) {
+      console.log("Session missing, retrying...");
+      await new Promise(r => setTimeout(r, 300));
+      session = await getSessionWithRetry();
+    }
+    if (!session) {
+      console.error("Session failed after retry");
+      return;
+    }
 
     const [entriesRes, suppliersRes, productsRes, godownsRes, variantsRes] = await Promise.all([
       runQueryWithGlobalRecovery(() => supabase.from('purchase_entries').select('*').order('created_at', { ascending: false }), { label: 'purchase-entries' }),

@@ -145,8 +145,16 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   }, [openRowMenu]);
 
   const ensureSessionForApi = useCallback(async () => {
-    const session = await getSessionWithRetry();
-    if (!session) return null;
+    let session = await getSessionWithRetry();
+    if (!session) {
+      console.log("Session missing, retrying...");
+      await new Promise(r => setTimeout(r, 300));
+      session = await getSessionWithRetry();
+    }
+    if (!session) {
+      console.error("Session failed after retry");
+      return null;
+    }
     return session;
   }, []);
 

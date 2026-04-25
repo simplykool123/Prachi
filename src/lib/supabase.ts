@@ -19,16 +19,20 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 });
 
 export const getSessionWithRetry = async (): Promise<Session | null> => {
-  const { data: { session } } = await supabase.auth.getSession();
-  console.log('Session:', session);
-  console.log('User:', session?.user);
-  if (session) return session;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    console.log('Session:', session);
+    console.log('User:', session?.user);
+    if (session) return session;
 
-  await new Promise(r => setTimeout(r, 300));
-  const { data: { session: retrySession } } = await supabase.auth.getSession();
-  console.log('Session:', retrySession);
-  console.log('User:', retrySession?.user);
-  return retrySession || null;
+    await new Promise(r => setTimeout(r, 300));
+    const { data: { session: retrySession } } = await supabase.auth.getSession();
+    console.log('Session:', retrySession);
+    console.log('User:', retrySession?.user);
+    return retrySession || null;
+  } catch {
+    return null;
+  }
 };
 
 const isAuthRelatedError = (error: unknown): boolean => {
