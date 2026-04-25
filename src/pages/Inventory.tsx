@@ -29,7 +29,7 @@ export default function Inventory() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [editing, setEditing] = useState<Product | null>(null);
   const [confirmProduct, setConfirmProduct] = useState<Product | null>(null);
-  const [linkedDocs, setLinkedDocs] = useState<{ soCount: number; dcCount: number; invCount: number; soNumbers: string[]; dcNumbers: string[]; invNumbers: string[] } | null>(null);
+  const [linkedDocs, setLinkedDocs] = useState<{ soCount: number; dcCount: number; invCount: number; poCount: number; soNumbers: string[]; dcNumbers: string[]; invNumbers: string[]; poNumbers: string[] } | null>(null);
   const [deleteStockInfo, setDeleteStockInfo] = useState<{ godownBreakdown: { godown_id: string; godown_name: string; quantity: number; variant_id: string | null; variant_name: string | null }[]; totalStock: number } | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [openRowMenu, setOpenRowMenu] = useState<string | null>(null);
@@ -384,10 +384,11 @@ export default function Inventory() {
 
   const initiateDelete = async (p: Product) => {
     setDeleteLoading(true);
-    const [soRes, dcRes, invRes, stockRes] = await Promise.all([
+    const [soRes, dcRes, invRes, poRes, stockRes] = await Promise.all([
       supabase.from('sales_order_items').select('sales_order_id, sales_orders!inner(so_number, status)').eq('product_id', p.id).neq('sales_orders.status', 'cancelled'),
       supabase.from('delivery_challan_items').select('delivery_challan_id, delivery_challans!inner(challan_number, status)').eq('product_id', p.id).neq('delivery_challans.status', 'cancelled'),
       supabase.from('invoice_items').select('invoice_id, invoices!inner(invoice_number, status)').eq('product_id', p.id).neq('invoices.status', 'cancelled'),
+      supabase.from('purchase_entry_items').select('purchase_entry_id, purchase_entries!inner(entry_number, status)').eq('product_id', p.id).neq('purchase_entries.status', 'cancelled'),
       supabase.from('godown_stock').select('godown_id, quantity, variant_id, product_variants(name), godowns(name)').eq('product_id', p.id),
     ]);
     setDeleteLoading(false);
@@ -395,6 +396,7 @@ export default function Inventory() {
     const soNumbers = (soRes.data || []).map((r: any) => r.sales_orders?.so_number).filter(Boolean);
     const dcNumbers = (dcRes.data || []).map((r: any) => r.delivery_challans?.challan_number).filter(Boolean);
     const invNumbers = (invRes.data || []).map((r: any) => r.invoices?.invoice_number).filter(Boolean);
+    const poNumbers = (poRes.data || []).map((r: any) => r.purchase_entries?.entry_number).filter(Boolean);
 
     const godownBreakdown = (stockRes.data || [])
       .filter((r: any) => (r.quantity || 0) > 0)
@@ -408,8 +410,8 @@ export default function Inventory() {
     const totalStock = godownBreakdown.reduce((s: number, r: any) => s + r.quantity, 0);
     setDeleteStockInfo({ godownBreakdown, totalStock });
 
-    if (soNumbers.length || dcNumbers.length || invNumbers.length) {
-      setLinkedDocs({ soCount: soNumbers.length, dcCount: dcNumbers.length, invCount: invNumbers.length, soNumbers, dcNumbers, invNumbers });
+    if (soNumbers.length || dcNumbers.length || invNumbers.length || poNumbers.length) {
+      setLinkedDocs({ soCount: soNumbers.length, dcCount: dcNumbers.length, invCount: invNumbers.length, poCount: poNumbers.length, soNumbers, dcNumbers, invNumbers, poNumbers });
     } else {
       setLinkedDocs(null);
     }
@@ -1556,6 +1558,12 @@ export default function Inventory() {
                     <div className="bg-green-50 border border-green-100 rounded-lg px-3 py-2">
                       <p className="text-[10px] font-bold text-green-500 uppercase tracking-wider mb-0.5">Invoices ({linkedDocs.invNumbers.length})</p>
                       <p className="text-xs text-green-800 font-medium leading-relaxed">{linkedDocs.invNumbers.join(', ')}</p>
+                    </div>
+                  )}
+                  {linkedDocs.poNumbers.length > 0 && (
+                    <div className="bg-purple-50 border border-purple-100 rounded-lg px-3 py-2">
+                      <p className="text-[10px] font-bold text-neutral-600 uppercase tracking-wider mb-0.5">Purchase Entries ({linkedDocs.poNumbers.length})</p>
+                      <p className="text-xs text-neutral-800 font-medium leading-relaxed">{linkedDocs.poNumbers.join(', ')}</p>
                     </div>
                   )}
                   <p className="text-xs text-neutral-500 pt-1">Remove this product from all linked documents before deleting.</p>
