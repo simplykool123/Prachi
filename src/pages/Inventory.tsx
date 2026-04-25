@@ -67,6 +67,17 @@ export default function Inventory() {
 
   async function loadData() {
     setLoading(true);
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session) {
+      await new Promise(r => setTimeout(r, 500));
+      const { data: { session: retrySession } } = await supabase.auth.getSession();
+      if (!retrySession) {
+        setLoading(false);
+        return;
+      }
+    }
+
     const [productsRes, godownsRes, godownStockRes, unitsRes, variantsRes] = await Promise.all([
       supabase.from('products').select('*').eq('is_active', true).order('name', { ascending: true }),
       supabase.from('godowns').select('*').eq('is_active', true).order('name'),
@@ -74,8 +85,38 @@ export default function Inventory() {
       supabase.from('product_units').select('*').order('created_at', { ascending: false }),
       supabase.from('product_variants').select('*').eq('is_active', true).order('name'),
     ]);
-    const rawProducts = productsRes.data || [];
-    const stockRows = godownStockRes.data || [];
+    if (productsRes.error) {
+      console.error(productsRes.error);
+      setLoading(false);
+      return;
+    }
+    if (godownsRes.error) {
+      console.error(godownsRes.error);
+      setLoading(false);
+      return;
+    }
+    if (godownStockRes.error) {
+      console.error(godownStockRes.error);
+      setLoading(false);
+      return;
+    }
+    if (unitsRes.error) {
+      console.error(unitsRes.error);
+      setLoading(false);
+      return;
+    }
+    if (variantsRes.error) {
+      console.error(variantsRes.error);
+      setLoading(false);
+      return;
+    }
+    if (!productsRes.data || !godownsRes.data || !godownStockRes.data || !unitsRes.data || !variantsRes.data) {
+      setLoading(false);
+      return;
+    }
+
+    const rawProducts = productsRes.data;
+    const stockRows = godownStockRes.data;
     const stockTotals: Record<string, number> = {};
     const variantStockTotals: Record<string, number> = {};
     for (const row of stockRows) {
@@ -85,12 +126,12 @@ export default function Inventory() {
       }
     }
     const byProduct: Record<string, ProductUnit[]> = {};
-    for (const unit of ((unitsRes.data || []) as ProductUnit[])) {
+    for (const unit of (unitsRes.data as ProductUnit[])) {
       byProduct[unit.product_id] = byProduct[unit.product_id] || [];
       byProduct[unit.product_id].push(unit);
     }
     const byVariant: Record<string, ProductVariant[]> = {};
-    for (const v of ((variantsRes.data || []) as ProductVariant[])) {
+    for (const v of (variantsRes.data as ProductVariant[])) {
       byVariant[v.product_id] = byVariant[v.product_id] || [];
       byVariant[v.product_id].push({ ...v, stock_quantity: variantStockTotals[v.id] ?? v.stock_quantity });
     }
@@ -108,7 +149,7 @@ export default function Inventory() {
     setProducts(merged);
     setProductUnitsMap(byProduct);
     setVariantsMap(byVariant);
-    setGodowns(godownsRes.data || []);
+    setGodowns(godownsRes.data);
     setLoading(false);
   };
 
@@ -445,8 +486,13 @@ export default function Inventory() {
   const openLedgerModal = async (p: Product) => {
     setLedgerProduct(p);
     setShowLedgerModal(true);
-    const { data } = await supabase.from('stock_movements').select('*').eq('product_id', p.id).order('created_at', { ascending: false }).limit(50);
-    setStockMovements(data || []);
+    const { data, error } = await supabase.from('stock_movements').select('*').eq('product_id', p.id).order('created_at', { ascending: false }).limit(50);
+    if (error) {
+      console.error(error);
+      return;
+    }
+    if (!data) return;
+    setStockMovements(data);
   };
 
   const handleStockUpdate = async () => {

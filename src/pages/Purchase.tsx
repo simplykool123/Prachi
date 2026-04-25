@@ -111,6 +111,14 @@ export default function Purchase() {
   useVisibilityReload(loadData);
 
   async function loadData() {
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session) {
+      await new Promise(r => setTimeout(r, 500));
+      const { data: { session: retrySession } } = await supabase.auth.getSession();
+      if (!retrySession) return;
+    }
+
     const [entriesRes, suppliersRes, productsRes, godownsRes, variantsRes] = await Promise.all([
       supabase.from('purchase_entries').select('*').order('created_at', { ascending: false }),
       supabase.from('suppliers').select('*').eq('is_active', true).order('name'),
@@ -118,12 +126,34 @@ export default function Purchase() {
       supabase.from('godowns').select('*').eq('is_active', true).order('name'),
       supabase.from('product_variants').select('*').eq('is_active', true).order('name'),
     ]);
-    setEntries(entriesRes.data || []);
-    setSuppliers(suppliersRes.data || []);
-    setProducts((productsRes.data || []) as Product[]);
-    setGodowns(godownsRes.data || []);
+    if (entriesRes.error) {
+      console.error(entriesRes.error);
+      return;
+    }
+    if (suppliersRes.error) {
+      console.error(suppliersRes.error);
+      return;
+    }
+    if (productsRes.error) {
+      console.error(productsRes.error);
+      return;
+    }
+    if (godownsRes.error) {
+      console.error(godownsRes.error);
+      return;
+    }
+    if (variantsRes.error) {
+      console.error(variantsRes.error);
+      return;
+    }
+    if (!entriesRes.data || !suppliersRes.data || !productsRes.data || !godownsRes.data || !variantsRes.data) return;
+
+    setEntries(entriesRes.data);
+    setSuppliers(suppliersRes.data);
+    setProducts(productsRes.data as Product[]);
+    setGodowns(godownsRes.data);
     const byVariant: Record<string, ProductVariant[]> = {};
-    for (const v of ((variantsRes.data || []) as ProductVariant[])) {
+    for (const v of (variantsRes.data as ProductVariant[])) {
       byVariant[v.product_id] = byVariant[v.product_id] || [];
       byVariant[v.product_id].push(v);
     }
@@ -578,8 +608,13 @@ export default function Purchase() {
   const toggleExpand = async (id: string) => {
     if (expandedEntry === id) { setExpandedEntry(null); return; }
     if (!entryItems[id]) {
-      const { data } = await supabase.from('purchase_entry_items').select('*').eq('purchase_entry_id', id);
-      setEntryItems(prev => ({ ...prev, [id]: data || [] }));
+      const { data, error } = await supabase.from('purchase_entry_items').select('*').eq('purchase_entry_id', id);
+      if (error) {
+        console.error(error);
+        return;
+      }
+      if (!data) return;
+      setEntryItems(prev => ({ ...prev, [id]: data }));
     }
     setExpandedEntry(id);
   };
