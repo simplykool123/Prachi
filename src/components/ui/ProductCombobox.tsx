@@ -111,7 +111,7 @@ export default function ProductCombobox({
           className="absolute z-[9999] left-0 right-0 top-full max-h-44 overflow-y-auto bg-white border border-neutral-200 rounded shadow-md py-0.5"
         >
           {filtered.map((p, idx) => {
-            const stock = godownStockMap[p.id] !== undefined ? godownStockMap[p.id] : p.stock_quantity ?? 0;
+            const stock = godownStockMap[p.id] !== undefined ? godownStockMap[p.id] : 0;
             return (
               <li
                 key={p.id}
