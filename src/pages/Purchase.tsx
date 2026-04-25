@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, FileText, Building2, ChevronDown, ChevronRight, X, Download, Warehouse, Truck, Pencil, XCircle } from 'lucide-react';
 import { supabase, getSessionWithRetry, runQueryWithGlobalRecovery } from '../lib/supabase';
-import { formatCurrency, formatDate, nextDocNumber, exportToCSV, useVisibilityReload } from '../lib/utils';
+import { formatCurrency, formatDate, nextDocNumber, exportToCSV, useVisibilityReload, getDefaultGodownId } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/ui/Modal';
 import EmptyState from '../components/ui/EmptyState';
@@ -221,7 +221,7 @@ export default function Purchase() {
 
   const openNewEntry = () => {
     setEditingEntry(null);
-    setForm({ supplier_id: '', supplier_name: '', entry_date: new Date().toISOString().split('T')[0], invoice_number: '', notes: '', godown_id: godowns[0]?.id || '', expected_delivery_date: '' });
+    setForm({ supplier_id: '', supplier_name: '', entry_date: new Date().toISOString().split('T')[0], invoice_number: '', notes: '', godown_id: getDefaultGodownId(godowns), expected_delivery_date: '' });
     setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', total_price: 0 }]);
     setShowModal(true);
   };
@@ -287,7 +287,7 @@ export default function Purchase() {
     });
     setReceiveItems(loaded.length ? loaded : []);
     setReceivingEntry(entry);
-    setReceiveGodownId(godowns[0]?.id || '');
+    setReceiveGodownId(getDefaultGodownId(godowns));
     setShowReceiveModal(true);
   };
 

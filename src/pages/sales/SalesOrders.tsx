@@ -3,7 +3,7 @@ import { Plus, Search, FileText, ChevronDown, ChevronRight, Receipt, Truck, Down
 import { INDIA_STATES } from '../../lib/indiaData';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { supabase, getSessionWithRetry, runQueryWithGlobalRecovery } from '../../lib/supabase';
-import { formatCurrency, formatDate, generateId, nextDocNumber, exportToCSV, useVisibilityReload } from '../../lib/utils';
+import { formatCurrency, formatDate, generateId, nextDocNumber, exportToCSV, useVisibilityReload, getDefaultGodownId } from '../../lib/utils';
 import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
@@ -213,7 +213,8 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     })));
     setGodowns(godownsData);
     if (godownsData.length > 0) {
-      setForm(f => ({ ...f, godown_id: f.godown_id || godownsData[0].id }));
+      const defaultGodownId = getDefaultGodownId(godownsData);
+      setForm(f => ({ ...f, godown_id: f.godown_id || defaultGodownId }));
     }
   };
 
@@ -261,7 +262,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
 
   const addItem = (focusNew = false) => {
     setItems(prev => {
-      const next = [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '', product_unit_ids: [] }];
+      const next = [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', discount_pct: '0', total_price: 0, godown_id: getDefaultGodownId(godowns), product_unit_ids: [] }];
       if (focusNew) {
         const newIdx = next.length - 1;
         setTimeout(() => getProductRef(newIdx).current?.focus(), 30);
@@ -313,7 +314,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       .gt('quantity', 0)
       .order('quantity', { ascending: false })
       .limit(1);
-    const bestGodown = stockRows?.[0]?.godown_id || godowns[0]?.id || '';
+    const bestGodown = stockRows?.[0]?.godown_id || getDefaultGodownId(godowns);
     setItems(prev => {
       const next = [...prev];
       next[i] = { ...next[i], godown_id: bestGodown };
@@ -414,7 +415,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
         .gt('quantity', 0)
         .order('quantity', { ascending: false })
         .limit(1);
-      const bestGodown = stockRows?.[0]?.godown_id || godowns[0]?.id || '';
+      const bestGodown = stockRows?.[0]?.godown_id || getDefaultGodownId(godowns);
       setItems(prev => {
         const next = [...prev];
         next[i] = { ...next[i], godown_id: bestGodown };
@@ -708,6 +709,15 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     await handleSave();
   };
 
+  const handleSubmit = async () => {
+    console.log('[SalesOrders] submit button click', { mode: editOrder ? 'edit' : 'create' });
+    if (editOrder) {
+      await handleEdit();
+      return;
+    }
+    await handleSave();
+  };
+
   const openEdit = async (order: SalesOrder) => {
     const session = await ensureSessionForApi();
     if (!session) return;
@@ -755,7 +765,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
             variant_id: (i as Record<string, any>).variant_id || undefined,
             weight_input: String((i as Record<string, any>).gemstone_weight || i.quantity || ''),
           }))
-        : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '', product_unit_ids: [] }]
+        : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', discount_pct: '0', total_price: 0, godown_id: getDefaultGodownId(godowns), product_unit_ids: [] }]
     );
     (existingItems || []).forEach((it, idx) => {
       if (it.product_id && it.godown_id) loadUnitsForLine(idx, it.product_id, it.godown_id);
@@ -952,9 +962,9 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
           </button>
           <button onClick={() => {
             setEditOrder(null);
-            setForm({ customer_id: '', customer_name: '', customer_phone: '', customer_address: '', customer_address2: '', customer_city: '', customer_state: '', customer_pincode: '', so_date: new Date().toISOString().split('T')[0], delivery_date: '', courier_charges: '0', discount_amount: '0', notes: '', godown_id: godowns[0]?.id || '', is_b2b: false, ship_to_mode: 'customer', ship_to_customer_id: '', ship_to_name: '', ship_to_address1: '', ship_to_address2: '', ship_to_city: '', ship_to_state: '', ship_to_pin: '', ship_to_phone: '' });
+            setForm({ customer_id: '', customer_name: '', customer_phone: '', customer_address: '', customer_address2: '', customer_city: '', customer_state: '', customer_pincode: '', so_date: new Date().toISOString().split('T')[0], delivery_date: '', courier_charges: '0', discount_amount: '0', notes: '', godown_id: getDefaultGodownId(godowns), is_b2b: false, ship_to_mode: 'customer', ship_to_customer_id: '', ship_to_name: '', ship_to_address1: '', ship_to_address2: '', ship_to_city: '', ship_to_state: '', ship_to_pin: '', ship_to_phone: '' });
             setGodownStockMap({});
-            setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', discount_pct: '0', total_price: 0, godown_id: '', product_unit_ids: [] }]);
+            setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', b2b_price: '', discount_pct: '0', total_price: 0, godown_id: getDefaultGodownId(godowns), product_unit_ids: [] }]);
             setShowModal(true);
           }} className="btn-primary">
             <Plus className="w-4 h-4" /> New Order
