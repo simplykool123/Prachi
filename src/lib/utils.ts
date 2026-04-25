@@ -93,6 +93,11 @@ export const truncate = (str: string, len = 30): string => {
   return str.length > len ? str.slice(0, len) + '...' : str;
 };
 
+export const getDefaultGodownId = (godowns: Array<{ id: string; is_default?: boolean }>): string => {
+  const defaultGodown = godowns.find(g => g.is_default);
+  return defaultGodown?.id || godowns[0]?.id || '';
+};
+
 export const daysBetween = (date1: string, date2: string = new Date().toISOString()): number => {
   const d1 = new Date(date1);
   const d2 = new Date(date2);

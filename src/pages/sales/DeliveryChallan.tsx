@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, Printer, Truck, Download, Eye, Pencil, Trash2, Send, Receipt, FileText, X, MoreVertical } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { formatDate, formatCurrency, generateId, nextDocNumber, exportToCSV, useVisibilityReload } from '../../lib/utils';
+import { formatDate, formatCurrency, generateId, nextDocNumber, exportToCSV, useVisibilityReload, getDefaultGodownId } from '../../lib/utils';
 import { getSmartRate } from '../../lib/rateCardService';
 import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
@@ -92,7 +92,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
   const [openRowMenu, setOpenRowMenu] = useState<string | null>(null);
   const [loadingSO, setLoadingSO] = useState(false);
   const [printCompany, setPrintCompany] = useState<Company | undefined>(undefined);
-  const [godowns, setGodowns] = useState<{id: string; name: string}[]>([]);
+  const [godowns, setGodowns] = useState<{id: string; name: string; is_default?: boolean}[]>([]);
 
   const [form, setForm] = useState(emptyForm);
   const [items, setItems] = useState<LineItem[]>([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: '' }]);
@@ -113,7 +113,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
       supabase.from('products').select('id, name, unit, selling_price, company_id').eq('is_active', true).order('name', { ascending: true }),
       supabase.from('customers').select('id, name, phone, address, address2, city, state, pincode').eq('is_active', true).order('name'),
       supabase.from('sales_orders').select('id, so_number, customer_id, customer_name, status, is_b2b').order('created_at', { ascending: false }).limit(500),
-      supabase.from('godowns').select('id, name').eq('is_active', true).order('name'),
+      supabase.from('godowns').select('id, name, is_default').eq('is_active', true).order('name'),
     ]);
     const allChallans = challansRes.data || [];
     setChallans(allChallans);
@@ -184,7 +184,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
           unit_price: String(i.unit_price),
           discount_pct: String(i.discount_pct || 0),
           total_price: i.total_price,
-          godown_id: i.godown_id || godowns[0]?.id || '',
+          godown_id: i.godown_id || getDefaultGodownId(godowns),
           gemstone_weight: gemW || undefined,
           product_unit_ids: unitIds || undefined,
           variant_id: varId || null,
@@ -227,7 +227,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
         .from('godown_stock').select('godown_id, quantity')
         .eq('product_id', value).gt('quantity', 0)
         .order('quantity', { ascending: false }).limit(1);
-      const bestGodown = stockRows?.[0]?.godown_id || godowns[0]?.id || '';
+      const bestGodown = stockRows?.[0]?.godown_id || getDefaultGodownId(godowns);
       setItems(prev => { const next=[...prev]; next[i]={...next[i], godown_id: bestGodown}; return next; });
     }
 
@@ -313,7 +313,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
   const openNew = () => {
     setEditChallan(null);
     setForm(emptyForm);
-    setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: '' }]);
+    setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: getDefaultGodownId(godowns) }]);
     setSoSelectSearch('');
     setShowSOSelectModal(true);
   };
@@ -322,7 +322,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
     setShowSOSelectModal(false);
     setEditChallan(null);
     setForm(emptyForm);
-    setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: '' }]);
+    setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: getDefaultGodownId(godowns) }]);
     await handleSOChange(soId);
     setShowModal(true);
   };
@@ -367,7 +367,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
             product_unit_ids: (i as Record<string, any>).product_unit_ids || undefined,
             variant_id: (i as Record<string, any>).variant_id || null,
           }))
-        : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '' }]
+        : [{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: getDefaultGodownId(godowns) }]
     );
     setShowModal(true);
   };
@@ -715,7 +715,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
           <div>
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm font-semibold text-neutral-700">Items</p>
-              <button onClick={() => setItems(prev => [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: godowns[0]?.id || '' }])}
+              <button onClick={() => setItems(prev => [...prev, { product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: getDefaultGodownId(godowns) }])}
                 className="btn-ghost text-xs"><Plus className="w-3.5 h-3.5" /> Add Item</button>
             </div>
             <div className="border border-neutral-200 rounded-lg overflow-hidden">

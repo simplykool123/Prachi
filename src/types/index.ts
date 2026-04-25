@@ -541,6 +541,7 @@ export interface Godown {
   location?: string;
   manager_name?: string;
   phone?: string;
+  is_default?: boolean;
   is_active: boolean;
   created_at: string;
   updated_at: string;

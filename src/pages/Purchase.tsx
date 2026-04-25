@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, FileText, Building2, ChevronDown, ChevronRight, X, Download, Warehouse, Truck, Pencil, XCircle } from 'lucide-react';
-import { supabase } from '../lib/supabase';
-import { formatCurrency, formatDate, nextDocNumber, exportToCSV, useVisibilityReload } from '../lib/utils';
+import { supabase, getSessionWithRetry, runQueryWithGlobalRecovery } from '../lib/supabase';
+import { formatCurrency, formatDate, nextDocNumber, exportToCSV, useVisibilityReload, getDefaultGodownId } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/ui/Modal';
 import EmptyState from '../components/ui/EmptyState';
@@ -111,19 +111,44 @@ export default function Purchase() {
   useVisibilityReload(loadData);
 
   async function loadData() {
+    const session = await getSessionWithRetry();
+    if (!session) return;
+
     const [entriesRes, suppliersRes, productsRes, godownsRes, variantsRes] = await Promise.all([
-      supabase.from('purchase_entries').select('*').order('created_at', { ascending: false }),
-      supabase.from('suppliers').select('*').eq('is_active', true).order('name'),
-      supabase.from('products').select('id, name, unit, purchase_price, weight_unit, product_type').eq('is_active', true).order('name', { ascending: true }),
-      supabase.from('godowns').select('*').eq('is_active', true).order('name'),
-      supabase.from('product_variants').select('*').eq('is_active', true).order('name'),
+      runQueryWithGlobalRecovery(() => supabase.from('purchase_entries').select('*').order('created_at', { ascending: false }), { label: 'purchase-entries' }),
+      runQueryWithGlobalRecovery(() => supabase.from('suppliers').select('*').eq('is_active', true).order('name'), { label: 'purchase-suppliers' }),
+      runQueryWithGlobalRecovery(() => supabase.from('products').select('id, name, unit, purchase_price, weight_unit, product_type').eq('is_active', true).order('name', { ascending: true }), { label: 'purchase-products' }),
+      runQueryWithGlobalRecovery(() => supabase.from('godowns').select('*').eq('is_active', true).order('name'), { label: 'purchase-godowns' }),
+      runQueryWithGlobalRecovery(() => supabase.from('product_variants').select('*').eq('is_active', true).order('name'), { allowEmpty: true, label: 'purchase-variants' }),
     ]);
-    setEntries(entriesRes.data || []);
-    setSuppliers(suppliersRes.data || []);
-    setProducts((productsRes.data || []) as Product[]);
-    setGodowns(godownsRes.data || []);
+    if (entriesRes.error) {
+      console.error(entriesRes.error);
+      return;
+    }
+    if (suppliersRes.error) {
+      console.error(suppliersRes.error);
+      return;
+    }
+    if (productsRes.error) {
+      console.error(productsRes.error);
+      return;
+    }
+    if (godownsRes.error) {
+      console.error(godownsRes.error);
+      return;
+    }
+    if (variantsRes.error) {
+      console.error(variantsRes.error);
+      return;
+    }
+    if (!entriesRes.data || !suppliersRes.data || !productsRes.data || !godownsRes.data || !variantsRes.data) return;
+
+    setEntries(entriesRes.data);
+    setSuppliers(suppliersRes.data);
+    setProducts(productsRes.data as Product[]);
+    setGodowns(godownsRes.data);
     const byVariant: Record<string, ProductVariant[]> = {};
-    for (const v of ((variantsRes.data || []) as ProductVariant[])) {
+    for (const v of (variantsRes.data as ProductVariant[])) {
       byVariant[v.product_id] = byVariant[v.product_id] || [];
       byVariant[v.product_id].push(v);
     }
@@ -196,7 +221,7 @@ export default function Purchase() {
 
   const openNewEntry = () => {
     setEditingEntry(null);
-    setForm({ supplier_id: '', supplier_name: '', entry_date: new Date().toISOString().split('T')[0], invoice_number: '', notes: '', godown_id: godowns[0]?.id || '', expected_delivery_date: '' });
+    setForm({ supplier_id: '', supplier_name: '', entry_date: new Date().toISOString().split('T')[0], invoice_number: '', notes: '', godown_id: getDefaultGodownId(godowns), expected_delivery_date: '' });
     setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', total_price: 0 }]);
     setShowModal(true);
   };
@@ -262,7 +287,7 @@ export default function Purchase() {
     });
     setReceiveItems(loaded.length ? loaded : []);
     setReceivingEntry(entry);
-    setReceiveGodownId(godowns[0]?.id || '');
+    setReceiveGodownId(getDefaultGodownId(godowns));
     setShowReceiveModal(true);
   };
 
@@ -578,8 +603,13 @@ export default function Purchase() {
   const toggleExpand = async (id: string) => {
     if (expandedEntry === id) { setExpandedEntry(null); return; }
     if (!entryItems[id]) {
-      const { data } = await supabase.from('purchase_entry_items').select('*').eq('purchase_entry_id', id);
-      setEntryItems(prev => ({ ...prev, [id]: data || [] }));
+      const { data, error } = await supabase.from('purchase_entry_items').select('*').eq('purchase_entry_id', id);
+      if (error) {
+        console.error(error);
+        return;
+      }
+      if (!data) return;
+      setEntryItems(prev => ({ ...prev, [id]: data }));
     }
     setExpandedEntry(id);
   };

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Package, AlertTriangle, Search, TrendingUp, TrendingDown, RefreshCw, X, ChevronRight, ChevronDown } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { supabase, getSessionWithRetry, runQueryWithGlobalRecovery } from '../../lib/supabase';
 import { formatCurrency, formatDate, useVisibilityReload } from '../../lib/utils';
 import type { Godown, GodownStock, StockMovement } from '../../types';
 
@@ -59,41 +59,81 @@ export default function GodownStockPage() {
 
   async function loadData() {
     setLoading(true);
+    const session = await getSessionWithRetry();
+    if (!session) {
+      setLoading(false);
+      return;
+    }
+
     const [godownsRes, stockRes, piecesRes] = await Promise.all([
-      supabase.from('godowns').select('*').eq('is_active', true).order('name'),
-      supabase.from('godown_stock')
+      runQueryWithGlobalRecovery(() => supabase.from('godowns').select('*').eq('is_active', true).order('name'), { label: 'godown-stock-godowns' }),
+      runQueryWithGlobalRecovery(() => supabase.from('godown_stock')
         .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price, product_type, weight_unit), product_variants(id, name, sku, selling_price, purchase_price)')
         .gte('quantity', 0)
-        .order('quantity', { ascending: false }),
-      supabase.from('product_units').select('id, product_id, weight, weight_unit, godown_id, status').eq('status', 'in_stock'),
+        .order('quantity', { ascending: false }), { allowEmpty: true, label: 'godown-stock-rows' }),
+      runQueryWithGlobalRecovery(() => supabase.from('product_units').select('id, product_id, weight, weight_unit, godown_id, status').eq('status', 'in_stock'), { allowEmpty: true, label: 'godown-stock-pieces' }),
     ]);
-    setGodowns(godownsRes.data || []);
-    setAllStock((stockRes.data || []) as GodownStock[]);
-    setGemPieces(piecesRes.data || []);
+    if (godownsRes.error) {
+      console.error(godownsRes.error);
+      setLoading(false);
+      return;
+    }
+    if (stockRes.error) {
+      console.error(stockRes.error);
+      setLoading(false);
+      return;
+    }
+    if (piecesRes.error) {
+      console.error(piecesRes.error);
+      setLoading(false);
+      return;
+    }
+    if (!godownsRes.data || !stockRes.data || !piecesRes.data) {
+      setLoading(false);
+      return;
+    }
+
+    setGodowns(godownsRes.data);
+    setAllStock(stockRes.data as GodownStock[]);
+    setGemPieces(piecesRes.data);
     setLoading(false);
   };
 
   const loadGodownStock = async (godownId: string) => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('godown_stock')
       .select('*, products(id, name, sku, unit, low_stock_alert, selling_price, purchase_price, product_type, weight_unit), product_variants(id, name, sku, selling_price, purchase_price)')
       .eq('godown_id', godownId)
       .gte('quantity', 0)
       .order('quantity', { ascending: false });
-    setGodownStock((data || []) as GodownStock[]);
+    if (error) {
+      console.error(error);
+      return;
+    }
+    if (!data) return;
+    setGodownStock(data as GodownStock[]);
   };
 
   const openDrillDown = async (product: ProductWithStock) => {
     if (product.product_type === 'variant') return;
     setDrillProduct(product);
     setMovementsLoading(true);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('stock_movements')
       .select('*, products(name, sku)')
       .eq('product_id', product.product_id)
       .order('created_at', { ascending: false })
       .limit(50);
-    setMovements((data || []) as MovementWithProduct[]);
+    if (error) {
+      console.error(error);
+      setMovementsLoading(false);
+      return;
+    }
+    if (!data) {
+      setMovementsLoading(false);
+      return;
+    }
+    setMovements(data as MovementWithProduct[]);
     setMovementsLoading(false);
   };
 

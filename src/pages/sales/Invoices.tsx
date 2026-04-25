@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Plus, Search, CreditCard, FileText, Download, Printer, Pencil, Eye, CheckCircle, XCircle, X, Truck } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { formatCurrency, formatDate, formatDateInput, generateId, nextDocNumber, exportToCSV, useVisibilityReload } from '../../lib/utils';
+import { formatCurrency, formatDate, formatDateInput, generateId, nextDocNumber, exportToCSV, useVisibilityReload, getDefaultGodownId } from '../../lib/utils';
 import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
@@ -171,7 +171,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
         notes: prefillFromDC.notes || '',
         bank_name: '', account_number: '', ifsc_code: '',
         sales_order_id: prefillFromDC.sales_order_id || '',
-        godown_id: godowns[0]?.id || '',
+        godown_id: getDefaultGodownId(godowns),
         delivery_challan_id: prefillFromDC.id || '',
       });
 
@@ -220,7 +220,8 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
     setCustomers((customersRes.data || []) as CustomerOption[]);
     setGodowns(godownsData);
     if (godownsData.length > 0) {
-      setForm(f => ({ ...f, godown_id: f.godown_id || godownsData[0].id }));
+      const defaultGodownId = getDefaultGodownId(godownsData);
+      setForm(f => ({ ...f, godown_id: f.godown_id || defaultGodownId }));
     }
     const sm: Record<string, any> = {};
     const soB2b: Record<string, boolean> = {};
@@ -307,7 +308,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
       notes: dc.notes || '',
       bank_name: '', account_number: '', ifsc_code: '',
       sales_order_id: dc.sales_order_id || '',
-      godown_id: godowns[0]?.id || '',
+      godown_id: getDefaultGodownId(godowns),
       delivery_challan_id: dc.id,
     });
     setItems(
@@ -354,7 +355,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
         .from('godown_stock').select('godown_id, quantity')
         .eq('product_id', value).gt('quantity', 0)
         .order('quantity', { ascending: false }).limit(1);
-      const bestGodown = stockRows?.[0]?.godown_id || godowns[0]?.id || '';
+      const bestGodown = stockRows?.[0]?.godown_id || getDefaultGodownId(godowns);
       setItems(prev => { const next=[...prev]; next[i]={...next[i], godown_id: bestGodown}; return next; });
       if (bestGodown) loadGodownStock(bestGodown, [value]);
     }

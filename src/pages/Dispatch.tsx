@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Truck, Plus, CreditCard as Edit2, Search, CheckCircle, Clock, ArrowRight, Hash, Warehouse, AlertCircle, Lock, Download, X, XCircle, ChevronDown } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { formatDate, exportToCSV, nextDocNumber } from '../lib/utils';
+import { formatDate, exportToCSV, nextDocNumber, getDefaultGodownId } from '../lib/utils';
 import { fetchGodowns } from '../services/godownService';
 import type { DispatchEntry, DeliveryChallan, Godown } from '../types';
 import type { ActivePage } from '../types';
@@ -164,7 +164,8 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
     const data = await fetchGodowns();
     setGodowns(data);
     if (data.length > 0) {
-      setForm(f => ({ ...f, godown_id: f.godown_id || data[0].id }));
+      const defaultGodownId = getDefaultGodownId(data);
+      setForm(f => ({ ...f, godown_id: f.godown_id || defaultGodownId }));
     }
   };
 
@@ -205,7 +206,7 @@ export default function Dispatch({ prefillFromDC, onNavigate: _onNavigate }: Dis
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ ...emptyForm, dispatch_date: new Date().toISOString().split('T')[0] });
+    setForm({ ...emptyForm, dispatch_date: new Date().toISOString().split('T')[0], godown_id: getDefaultGodownId(godowns) });
     setShowModal(true);
   };
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, ArrowRight, Warehouse, Package, Search, ChevronDown, ChevronRight, Download, CheckCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { formatCurrency, formatDate, nextDocNumber, exportToCSV } from '../../lib/utils';
+import { formatCurrency, formatDate, nextDocNumber, exportToCSV, getDefaultGodownId } from '../../lib/utils';
 import Modal from '../../components/ui/Modal';
 import EmptyState from '../../components/ui/EmptyState';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
@@ -102,6 +102,10 @@ export default function GodownTransfer() {
         .order('created_at', { ascending: false }),
     ]);
     setGodowns(godownsRes.data || []);
+    if (godownsRes.data && godownsRes.data.length > 0) {
+      const defaultGodownId = getDefaultGodownId(godownsRes.data as Godown[]);
+      setForm(f => ({ ...f, from_godown_id: f.from_godown_id || defaultGodownId }));
+    }
     setProducts((productsRes.data || []) as ProductOption[]);
     const vMap: Record<string, VariantOption[]> = {};
     for (const v of ((variantsRes.data || []) as VariantOption[])) {
@@ -286,7 +290,7 @@ export default function GodownTransfer() {
     }
 
     setShowModal(false);
-    setForm({ transfer_date: new Date().toISOString().split('T')[0], from_godown_id: '', to_godown_id: '', reason: '', notes: '' });
+    setForm({ transfer_date: new Date().toISOString().split('T')[0], from_godown_id: getDefaultGodownId(godowns), to_godown_id: '', reason: '', notes: '' });
     setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', available_qty: 0 }]);
     setGodownStockMap({});
     setSaving(false);
