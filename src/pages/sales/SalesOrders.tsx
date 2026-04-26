@@ -529,7 +529,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       return p?.product_type === 'gemstone' && (i.product_unit_ids || []).length === 0;
     });
     if (missingGodown.length > 0) {
-      alert(`Please select a godown for every product line. ${missingGodown.length} line(s) have no godown assigned.`);
+      toast.error(`Please select a godown for every product line. ${missingGodown.length} line(s) have no godown assigned.`);
       return;
     }
     if (missingGemPieces.length > 0) {
@@ -602,9 +602,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       loadData();
     } catch (err) {
       console.error('Failed to create sales order:', err);
-      const message = err instanceof Error ? err.message : 'Failed to create sales order';
-      toast.error(message);
-      alert(message);
+      toast.error(err instanceof Error ? err.message : 'Failed to create sales order');
     } finally {
       setIsSubmitting(false);
     }
@@ -625,7 +623,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       return p?.product_type === 'gemstone' && (i.product_unit_ids || []).length === 0;
     });
     if (missingGodown.length > 0) {
-      alert(`Please select a godown for every product line. ${missingGodown.length} line(s) have no godown assigned.`);
+      toast.error(`Please select a godown for every product line. ${missingGodown.length} line(s) have no godown assigned.`);
       return;
     }
     if (missingGemPieces.length > 0) {
@@ -700,9 +698,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       loadData();
     } catch (err) {
       console.error('Failed to update sales order:', err);
-      const message = err instanceof Error ? err.message : 'Failed to update sales order';
-      toast.error(message);
-      alert(message);
+      toast.error(err instanceof Error ? err.message : 'Failed to update sales order');
     } finally {
       setIsSubmitting(false);
     }
@@ -920,7 +916,13 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       });
       onNavigate('challans');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to convert Sales Order to Delivery Challan');
+      const msg = err instanceof Error ? err.message : '';
+      // check_violation (23514) = stock went negative between our pre-check and the RPC
+      if (msg.includes('stock') || msg.includes('23514') || msg.includes('Insufficient')) {
+        toast.error('Stock changed between check and dispatch. Please refresh and try again.');
+      } else {
+        toast.error(msg || 'Failed to convert Sales Order to Delivery Challan');
+      }
     } finally {
       setConverting(null);
     }

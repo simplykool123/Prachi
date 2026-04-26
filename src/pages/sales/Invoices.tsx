@@ -569,8 +569,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
       await cancelInvoice(selectedInvoice.id);
       loadData();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to cancel invoice';
-      alert(msg);
+      toast.error(err instanceof Error ? err.message : 'Failed to cancel invoice');
     }
   };
 
@@ -1439,7 +1438,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
             setCancelTarget(null);
             loadData();
           } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to cancel invoice');
+            toast.error(err instanceof Error ? err.message : 'Failed to cancel invoice');
           } finally {
             setCancellingInvoiceId(null);
           }
