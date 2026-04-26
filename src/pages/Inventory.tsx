@@ -10,12 +10,14 @@ import type { Product, ProductUnit, ProductVariant, ProductType, StockMovement, 
 import { fetchCompanies } from '../lib/companiesService';
 import type { Company } from '../lib/companiesService';
 import { processStockMovement, addGemPieces, removeGemPieces, updateGemPieceMetadata, markGemPiecesSold, setVariantGodownStock } from '../services/stockService';
+import { useToast } from '../components/ui/Toast';
 
 const CATEGORIES = ['All', 'Astro Products', 'Vastu Items', 'Healing Items'] as const;
 const UNITS = ['pcs', 'grams', 'kg', 'sets', 'ml', 'liters'];
 
 export default function Inventory() {
   const { isAdmin } = useAuth();
+  const toast = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [imageUploading, setImageUploading] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
@@ -419,8 +421,7 @@ export default function Inventory() {
       setShowModal(false);
       loadData();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      alert(`Save failed: ${msg}`);
+      toast.error(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -465,8 +466,7 @@ export default function Inventory() {
       const { error } = await supabase.rpc('safe_delete_product', { p_product_id: p.id });
       if (error) throw error;
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      alert(`Delete failed: ${msg}`);
+      toast.error(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
     setConfirmProduct(null);
@@ -514,7 +514,7 @@ export default function Inventory() {
 
         if (['purchase', 'return'].includes(mvType)) {
           if (parsedWeights.length === 0) {
-            alert('Please enter one weight per line for gemstone pieces.');
+            toast.error('Please enter one weight per line for gemstone pieces.');
             return;
           }
           const weightUnit: 'g' | 'kg' | 'carat' =
@@ -529,7 +529,7 @@ export default function Inventory() {
         } else if (mvType === 'sale') {
           const toSell = Array.from(selectedPieceIds);
           if (toSell.length === 0) {
-            alert('Select at least one piece to mark as sold.');
+            toast.error('Select at least one piece to mark as sold.');
             return;
           }
           // Mark sold in product_units then dispatch from godown_stock
@@ -560,11 +560,11 @@ export default function Inventory() {
             });
           }
           if (editEntries.length === 0 && toRemove.length === 0) {
-            alert('No changes to save.');
+            toast.error('No changes to save.');
             return;
           }
         } else {
-          alert('Use Purchase/Return/Sale for gemstone piece tracking.');
+          toast.error('Use Purchase/Return/Sale for gemstone piece tracking.');
           return;
         }
 
@@ -619,7 +619,7 @@ export default function Inventory() {
       setSelectedProduct(null);
     } catch (error) {
       console.error('Error updating stock:', error);
-      alert('Failed to update stock. Please try again.');
+      toast.error('Failed to update stock. Please try again.');
     }
   };
 
