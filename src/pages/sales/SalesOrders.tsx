@@ -10,7 +10,7 @@ import EmptyState from '../../components/ui/EmptyState';
 import { useToast } from '../../components/ui/Toast';
 import { useAsyncAction } from '../../hooks/useAsyncAction';
 import { useDateRange } from '../../contexts/DateRangeContext';
-import { createSalesOrder, createDeliveryChallan, cancelInvoice, cancelDeliveryChallan } from '../../services/documentFlowService';
+import { createSalesOrder, createDeliveryChallan, cancelInvoice, cancelDeliveryChallan, checkStockForSalesOrder } from '../../services/documentFlowService';
 import { getSmartRate } from '../../lib/rateCardService';
 import { fetchGodowns } from '../../services/godownService';
 import { markGemPiecesSold, revertGemPiecesSold } from '../../services/stockService';
@@ -904,6 +904,14 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     if (!session) return;
     setConverting(order.id);
     try {
+      const shortfalls = await checkStockForSalesOrder(order.id);
+      if (shortfalls.length > 0) {
+        const lines = shortfalls.map(s =>
+          `• ${s.product_name} (${s.godown_name}): need ${s.needed}, have ${s.available}`
+        );
+        toast.error(`Insufficient stock:\n${lines.join('\n')}`);
+        return;
+      }
       const challanNumber = await nextDocNumber('DC', supabase);
       await createDeliveryChallan(order.id, {
         challan_number: challanNumber,

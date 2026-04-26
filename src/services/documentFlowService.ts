@@ -115,3 +115,64 @@ export async function cancelInvoice(invoiceId: string): Promise<void> {
   });
   if (error) throw error;
 }
+
+export interface StockShortfall {
+  product_name: string;
+  godown_name: string;
+  needed: number;
+  available: number;
+}
+
+/** Pre-flight check: returns list of items that don't have enough stock. Empty = OK to proceed. */
+export async function checkStockForSalesOrder(salesOrderId: string): Promise<StockShortfall[]> {
+  const { data: items, error: itemsErr } = await supabase
+    .from('sales_order_items')
+    .select('product_id, product_name, godown_id, quantity, variant_id')
+    .eq('sales_order_id', salesOrderId);
+
+  if (itemsErr) throw itemsErr;
+  if (!items || items.length === 0) return [];
+
+  // Only check items that have a godown_id (those are the ones the RPC will deduct from)
+  const checkable = items.filter(i => i.godown_id && i.product_id);
+  if (checkable.length === 0) return [];
+
+  const godownIds = [...new Set(checkable.map(i => i.godown_id as string))];
+
+  const { data: godowns } = await supabase
+    .from('godowns')
+    .select('id, name')
+    .in('id', godownIds);
+
+  const godownMap = Object.fromEntries((godowns || []).map(g => [g.id, g.name]));
+
+  const shortfalls: StockShortfall[] = [];
+
+  for (const item of checkable) {
+    let query = supabase
+      .from('godown_stock')
+      .select('quantity')
+      .eq('product_id', item.product_id)
+      .eq('godown_id', item.godown_id);
+
+    if (item.variant_id) {
+      query = query.eq('variant_id', item.variant_id);
+    } else {
+      query = query.is('variant_id', null);
+    }
+
+    const { data: stockRows } = await query;
+    const available = stockRows && stockRows.length > 0 ? Number(stockRows[0].quantity) : 0;
+
+    if (available < item.quantity) {
+      shortfalls.push({
+        product_name: item.product_name || 'Unknown product',
+        godown_name: godownMap[item.godown_id as string] || 'Unknown godown',
+        needed: item.quantity,
+        available,
+      });
+    }
+  }
+
+  return shortfalls;
+}

@@ -36,10 +36,13 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
         supabase.from('reminders').select('id', { count: 'exact', head: true }).eq('is_read', false),
       ]);
       setUnpaidInvoices(invoiceRes.count || 0);
-      setUnreadReminders(reminderRes.count || 0);
+      // Gracefully handle table-not-found (migration not yet applied to live DB)
+      if (!reminderRes.error) {
+        setUnreadReminders(reminderRes.count || 0);
+      }
     };
     loadBadges();
-    // Poll reminders every 60s
+    // Poll every 60s
     const interval = setInterval(loadBadges, 60000);
     return () => clearInterval(interval);
   }, []);
