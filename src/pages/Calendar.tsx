@@ -1,20 +1,26 @@
-import { useState, useEffect } from 'react';
-import { Plus, ChevronLeft, ChevronRight, MapPin, Clock, Pencil, Trash2 } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Plus, ChevronLeft, ChevronRight, MapPin, Clock, Pencil, Trash2, RefreshCw, Wifi, WifiOff, AlertCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { formatDate } from '../lib/utils';
 import Modal from '../components/ui/Modal';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
+import {
+  isGoogleConnected, connectGoogle, disconnectGoogle, getGoogleClientId,
+  createGoogleEvent, updateGoogleEvent, deleteGoogleEvent,
+} from '../lib/googleCalendar';
+import { fireAutomation } from '../services/automationService';
 import type { Appointment, TravelPlan } from '../types';
 
 interface CustomerOption {
   id: string;
   name: string;
+  phone?: string;
 }
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-const APPT_COLORS: Record<string, any> = {
+const APPT_COLORS: Record<string, string> = {
   'Astro Reading': 'bg-primary-100 text-primary-700 border-primary-200',
   'Vastu Audit': 'bg-accent-100 text-accent-700 border-accent-200',
   'Consultation': 'bg-blue-100 text-blue-700 border-blue-200',
@@ -24,12 +30,21 @@ const APPT_COLORS: Record<string, any> = {
   'Phone Call': 'bg-neutral-100 text-neutral-600 border-neutral-200',
 };
 
+const toLocalDateStr = (d: Date) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+const todayStr = toLocalDateStr(new Date());
+
 const EMPTY_FORM = {
   title: '',
   customer_id: '',
   customer_name: '',
   appointment_type: 'Consultation' as Appointment['appointment_type'],
-  date: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
+  date: todayStr,
   start_time: '09:00',
   end_time: '10:00',
   location: '',
@@ -40,6 +55,7 @@ const EMPTY_FORM = {
 export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [upcomingAppts, setUpcomingAppts] = useState<Appointment[]>([]);
   const [travelPlans, setTravelPlans] = useState<TravelPlan[]>([]);
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
@@ -47,13 +63,13 @@ export default function CalendarPage() {
   const [showTravelModal, setShowTravelModal] = useState(false);
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
   const [deletingAppointment, setDeletingAppointment] = useState<Appointment | null>(null);
-
+  const [gcConnected, setGcConnected] = useState(isGoogleConnected());
+  const [gcSyncing, setGcSyncing] = useState(false);
+  const [gcError, setGcError] = useState('');
   const [form, setForm] = useState(EMPTY_FORM);
   const [travelForm, setTravelForm] = useState({ city: '', start_date: '', end_date: '', hotel_name: '', notes: '' });
 
-  useEffect(() => { loadData(); }, [currentDate]);
-
-  async function loadData() {
+  const loadMonthData = useCallback(async () => {
     const year = currentDate.getFullYear();
     const month = String(currentDate.getMonth() + 1).padStart(2, '0');
     const startDate = `${year}-${month}-01`;
@@ -62,47 +78,65 @@ export default function CalendarPage() {
     const [apptRes, travelRes, customersRes] = await Promise.all([
       supabase.from('appointments').select('*').gte('start_time', startDate).lte('start_time', endDate + 'T23:59:59').order('start_time'),
       supabase.from('travel_plans').select('*').order('start_date'),
-      supabase.from('customers').select('id, name').eq('is_active', true).order('name'),
+      supabase.from('customers').select('id, name, phone').eq('is_active', true).order('name'),
     ]);
     setAppointments(apptRes.data || []);
     setTravelPlans(travelRes.data || []);
     setCustomers((customersRes.data || []) as CustomerOption[]);
-  };
+  }, [currentDate]);
 
-  const getDaysInMonth = () => {
+  // Separate query for upcoming 7 days — runs independently of calendar month
+  const loadUpcoming = useCallback(async () => {
+    const futureStr = toLocalDateStr(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+    const { data } = await supabase
+      .from('appointments')
+      .select('*')
+      .gte('start_time', todayStr)
+      .lte('start_time', futureStr + 'T23:59:59')
+      .order('start_time')
+      .limit(10);
+    setUpcomingAppts(data || []);
+  }, []);
+
+  useEffect(() => {
+    loadMonthData();
+    loadUpcoming();
+  }, [loadMonthData, loadUpcoming]);
+
+  const { firstDay, daysInMonth } = (() => {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
-    const firstDay = new Date(year, month, 1).getDay();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    return { firstDay, daysInMonth };
-  };
-
-  const { firstDay, daysInMonth } = getDaysInMonth();
+    return {
+      firstDay: new Date(year, month, 1).getDay(),
+      daysInMonth: new Date(year, month + 1, 0).getDate(),
+    };
+  })();
 
   const getApptsByDate = (day: number) => {
     const year = currentDate.getFullYear();
     const month = String(currentDate.getMonth() + 1).padStart(2, '0');
-    const date = `${year}-${month}-${String(day).padStart(2, '0')}`;
-    return appointments.filter(a => a.start_time.startsWith(date));
+    const dateStr = `${year}-${month}-${String(day).padStart(2, '0')}`;
+    return appointments.filter(a => a.start_time.startsWith(dateStr));
   };
 
-  const toLocalDateStr = (d: Date) => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  };
+  const getTravelForDate = (dateStr: string) =>
+    travelPlans.find(t => t.start_date <= dateStr && t.end_date >= dateStr);
 
   const getSelectedDateAppts = () => {
     const dateStr = toLocalDateStr(selectedDate);
     return appointments.filter(a => a.start_time.startsWith(dateStr)).sort((a, b) => a.start_time.localeCompare(b.start_time));
   };
 
-  const getTravelForDate = (day: number) => {
-    const year = currentDate.getFullYear();
-    const month = String(currentDate.getMonth() + 1).padStart(2, '0');
-    const dateStr = `${year}-${month}-${String(day).padStart(2, '0')}`;
-    return travelPlans.find(t => t.start_date <= dateStr && t.end_date >= dateStr);
+  // Bug fix: when navigating months, reset selectedDate to first of new month
+  const prevMonth = () => {
+    const d = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1);
+    setCurrentDate(d);
+    setSelectedDate(d);
+  };
+  const nextMonth = () => {
+    const d = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1);
+    setCurrentDate(d);
+    setSelectedDate(d);
   };
 
   const openNewAppointment = (date: string) => {
@@ -115,7 +149,7 @@ export default function CalendarPage() {
     setEditingAppointment(appt);
     const dateStr = appt.start_time.split('T')[0];
     const startTime = appt.start_time.split('T')[1]?.slice(0, 5) || '09:00';
-    const endTime = appt.end_time.split('T')[1]?.slice(0, 5) || '10:00';
+    const endTime = appt.end_time?.split('T')[1]?.slice(0, 5) || '10:00';
     setForm({
       title: appt.title,
       customer_id: appt.customer_id || '',
@@ -145,37 +179,122 @@ export default function CalendarPage() {
       notes: form.notes,
     };
 
+    let savedAppt: Appointment | null = null;
+
     if (editingAppointment) {
-      await supabase.from('appointments').update(payload).eq('id', editingAppointment.id);
+      // Google Calendar update
+      let googleEventId = editingAppointment.google_event_id;
+      if (gcConnected && googleEventId) {
+        try {
+          await updateGoogleEvent(googleEventId, payload);
+        } catch (e) {
+          console.error('[GCal] update failed:', e);
+        }
+      } else if (gcConnected && !googleEventId) {
+        // First sync for an existing appointment
+        try {
+          googleEventId = await createGoogleEvent(payload);
+        } catch (e) {
+          console.error('[GCal] create on edit failed:', e);
+        }
+      }
+      const { data } = await supabase
+        .from('appointments')
+        .update({ ...payload, google_event_id: googleEventId || null })
+        .eq('id', editingAppointment.id)
+        .select()
+        .single();
+      savedAppt = data;
     } else {
-      await supabase.from('appointments').insert({ ...payload, status: 'scheduled' });
+      // Google Calendar create
+      let googleEventId: string | undefined;
+      if (gcConnected) {
+        try {
+          googleEventId = await createGoogleEvent(payload);
+        } catch (e) {
+          console.error('[GCal] create failed:', e);
+        }
+      }
+      const { data } = await supabase
+        .from('appointments')
+        .insert({ ...payload, status: 'scheduled', google_event_id: googleEventId || null })
+        .select()
+        .single();
+      savedAppt = data;
+
+      // Fire automation for new appointments
+      if (savedAppt) {
+        await fireAutomation('appointment_scheduled', {
+          entity_type: 'appointment',
+          entity_id: savedAppt.id,
+          entity_name: payload.title,
+          customer_name: payload.customer_name || '',
+          customer_phone: customer?.phone || '',
+          appointment_type: payload.appointment_type,
+          appointment_time: payload.start_time,
+        });
+      }
     }
+
     setShowModal(false);
     setEditingAppointment(null);
-    loadData();
+    loadMonthData();
+    loadUpcoming();
   };
 
   const handleDeleteAppointment = async () => {
     if (!deletingAppointment) return;
+
+    // Delete from Google Calendar if synced
+    if (gcConnected && deletingAppointment.google_event_id) {
+      try {
+        await deleteGoogleEvent(deletingAppointment.google_event_id);
+      } catch (e) {
+        console.error('[GCal] delete failed:', e);
+      }
+    }
+
     await supabase.from('appointments').delete().eq('id', deletingAppointment.id);
     setDeletingAppointment(null);
-    loadData();
+    loadMonthData();
+    loadUpcoming();
   };
 
   const handleSaveTravelPlan = async () => {
     await supabase.from('travel_plans').insert(travelForm);
     setShowTravelModal(false);
-    loadData();
+    loadMonthData();
   };
 
-  const formatTime = (iso: string) => {
-    return new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+  const handleGoogleConnect = async () => {
+    if (gcConnected) {
+      disconnectGoogle();
+      setGcConnected(false);
+      return;
+    }
+    const clientId = getGoogleClientId();
+    if (!clientId) {
+      setGcError('VITE_GOOGLE_CLIENT_ID not set in .env — see .env.example for setup instructions.');
+      return;
+    }
+    setGcSyncing(true);
+    setGcError('');
+    try {
+      await connectGoogle();
+      setGcConnected(true);
+    } catch (e) {
+      setGcError(e instanceof Error ? e.message : 'Google auth failed');
+    } finally {
+      setGcSyncing(false);
+    }
   };
 
-  const prevMonth = () => setCurrentDate(d => new Date(d.getFullYear(), d.getMonth() - 1, 1));
-  const nextMonth = () => setCurrentDate(d => new Date(d.getFullYear(), d.getMonth() + 1, 1));
+  const formatTime = (iso: string) =>
+    new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
 
   const selectedDateAppts = getSelectedDateAppts();
+  const selectedDateStr = toLocalDateStr(selectedDate);
+  const selectedTravel = getTravelForDate(selectedDateStr);
 
   return (
     <div className="flex-1 overflow-y-auto bg-neutral-50">
@@ -184,13 +303,41 @@ export default function CalendarPage() {
           <h1 className="text-xl font-semibold text-neutral-900">Schedule & Travel</h1>
           <p className="text-xs text-neutral-500 mt-0.5">Orchestrate your spiritual consultancy journey</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {/* Google Calendar connect */}
+          <button
+            onClick={handleGoogleConnect}
+            disabled={gcSyncing}
+            title={gcConnected ? 'Disconnect Google Calendar' : 'Connect Google Calendar to sync with mobile'}
+            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-all ${
+              gcConnected
+                ? 'border-green-200 bg-green-50 text-green-700 hover:bg-green-100'
+                : 'border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50'
+            }`}
+          >
+            {gcSyncing ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            ) : gcConnected ? (
+              <Wifi className="w-3.5 h-3.5" />
+            ) : (
+              <WifiOff className="w-3.5 h-3.5" />
+            )}
+            {gcConnected ? 'Google Synced' : 'Connect Google'}
+          </button>
           <button onClick={() => setShowTravelModal(true)} className="btn-secondary text-xs">+ Travel Plan</button>
           <button onClick={() => openNewAppointment(toLocalDateStr(selectedDate))} className="btn-primary">
             <Plus className="w-4 h-4" /> Schedule Appointment
           </button>
         </div>
       </div>
+
+      {gcError && (
+        <div className="mx-6 mt-3 flex items-start gap-2 bg-error-50 border border-error-200 rounded-xl px-4 py-3 text-xs text-error-700">
+          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>{gcError}</span>
+          <button onClick={() => setGcError('')} className="ml-auto text-error-500 hover:text-error-700 font-bold">✕</button>
+        </div>
+      )}
 
       <div className="p-6 grid grid-cols-3 gap-5">
         <div className="col-span-2 space-y-4">
@@ -216,12 +363,19 @@ export default function CalendarPage() {
               {Array.from({ length: daysInMonth }).map((_, i) => {
                 const day = i + 1;
                 const dayAppts = getApptsByDate(day);
-                const travel = getTravelForDate(day);
-                const isToday = new Date().getDate() === day && new Date().getMonth() === currentDate.getMonth() && new Date().getFullYear() === currentDate.getFullYear();
+                const year = currentDate.getFullYear();
+                const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+                const dayStr = `${year}-${month}-${String(day).padStart(2, '0')}`;
+                const travel = getTravelForDate(dayStr);
+                const today = new Date();
+                const isToday = today.getDate() === day && today.getMonth() === currentDate.getMonth() && today.getFullYear() === currentDate.getFullYear();
                 const isSelected = selectedDate.getDate() === day && selectedDate.getMonth() === currentDate.getMonth() && selectedDate.getFullYear() === currentDate.getFullYear();
                 return (
-                  <div key={day} onClick={() => setSelectedDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), day))}
-                    className={`min-h-16 p-1 rounded-lg cursor-pointer transition-all ${isSelected ? 'bg-primary-50 border border-primary-200' : 'hover:bg-neutral-50 border border-transparent'} ${travel ? 'ring-1 ring-accent-300' : ''}`}>
+                  <div
+                    key={day}
+                    onClick={() => setSelectedDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), day))}
+                    className={`min-h-16 p-1 rounded-lg cursor-pointer transition-all ${isSelected ? 'bg-primary-50 border border-primary-200' : 'hover:bg-neutral-50 border border-transparent'} ${travel ? 'ring-1 ring-accent-300' : ''}`}
+                  >
                     <p className={`text-xs font-semibold w-6 h-6 flex items-center justify-center rounded-full ${isToday ? 'bg-primary-600 text-white' : 'text-neutral-700'}`}>{day}</p>
                     {travel && <div className="text-[8px] font-medium text-accent-700 bg-accent-100 rounded px-1 mt-0.5 truncate">{travel.city}</div>}
                     {dayAppts.slice(0, 2).map(a => (
@@ -268,13 +422,16 @@ export default function CalendarPage() {
                 <p className="text-base font-semibold text-neutral-900">
                   {DAYS[selectedDate.getDay()]}, {MONTHS[selectedDate.getMonth()].slice(0, 3)} {selectedDate.getDate()}
                 </p>
-                {getTravelForDate(selectedDate.getDate()) && (
+                {selectedTravel && (
                   <p className="text-xs text-accent-600 flex items-center gap-1 mt-0.5">
-                    <MapPin className="w-3 h-3" />{getTravelForDate(selectedDate.getDate())?.hotel_name || getTravelForDate(selectedDate.getDate())?.city}
+                    <MapPin className="w-3 h-3" />{selectedTravel.hotel_name || selectedTravel.city}
                   </p>
                 )}
               </div>
-              <button onClick={() => openNewAppointment(toLocalDateStr(selectedDate))} className="w-6 h-6 bg-primary-600 text-white rounded-full flex items-center justify-center hover:bg-primary-700">
+              <button
+                onClick={() => openNewAppointment(toLocalDateStr(selectedDate))}
+                className="w-6 h-6 bg-primary-600 text-white rounded-full flex items-center justify-center hover:bg-primary-700"
+              >
                 <Plus className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -294,18 +451,13 @@ export default function CalendarPage() {
                         <p className="text-xs font-medium truncate">{formatTime(a.start_time)} – {formatTime(a.end_time)}</p>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
-                        <button
-                          onClick={() => openEditAppointment(a)}
-                          className="w-5 h-5 flex items-center justify-center rounded hover:bg-black/10 transition-colors"
-                          title="Edit appointment"
-                        >
+                        {a.google_event_id && (
+                          <span title="Synced to Google Calendar" className="text-[8px] text-green-600 font-bold">GCal</span>
+                        )}
+                        <button onClick={() => openEditAppointment(a)} className="w-5 h-5 flex items-center justify-center rounded hover:bg-black/10 transition-colors">
                           <Pencil className="w-3 h-3" />
                         </button>
-                        <button
-                          onClick={() => setDeletingAppointment(a)}
-                          className="w-5 h-5 flex items-center justify-center rounded hover:bg-red-200 text-red-600 transition-colors"
-                          title="Delete appointment"
-                        >
+                        <button onClick={() => setDeletingAppointment(a)} className="w-5 h-5 flex items-center justify-center rounded hover:bg-red-200 text-red-600 transition-colors">
                           <Trash2 className="w-3 h-3" />
                         </button>
                       </div>
@@ -326,15 +478,10 @@ export default function CalendarPage() {
           <div className="card">
             <p className="text-sm font-semibold text-neutral-800 mb-3">Upcoming (Next 7 Days)</p>
             <div className="space-y-2">
-              {appointments
-                .filter(a => {
-                  const d = new Date(a.start_time);
-                  const today = new Date();
-                  const diff = (d.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
-                  return diff >= 0 && diff <= 7;
-                })
-                .slice(0, 5)
-                .map(a => (
+              {upcomingAppts.length === 0 ? (
+                <p className="text-xs text-neutral-400 text-center py-3">No upcoming appointments</p>
+              ) : (
+                upcomingAppts.map(a => (
                   <div key={a.id} className="flex items-start gap-2 group">
                     <div className="w-1 h-1 bg-primary-500 rounded-full mt-2 shrink-0" />
                     <div className="flex-1 min-w-0">
@@ -348,14 +495,7 @@ export default function CalendarPage() {
                       <Pencil className="w-3 h-3 text-neutral-500" />
                     </button>
                   </div>
-                ))}
-              {appointments.filter(a => {
-                const d = new Date(a.start_time);
-                const today = new Date();
-                const diff = (d.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
-                return diff >= 0 && diff <= 7;
-              }).length === 0 && (
-                <p className="text-xs text-neutral-400 text-center py-3">No upcoming appointments</p>
+                ))
               )}
             </div>
           </div>
@@ -374,7 +514,8 @@ export default function CalendarPage() {
               {editingAppointment ? 'Save Changes' : 'Schedule'}
             </button>
           </>
-        }>
+        }
+      >
         <div className="space-y-3">
           <div>
             <label className="label">Title *</label>
@@ -421,6 +562,11 @@ export default function CalendarPage() {
             <label className="label">Notes</label>
             <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className="input resize-none h-16" />
           </div>
+          {gcConnected && (
+            <p className="text-[10px] text-green-600 flex items-center gap-1">
+              <Wifi className="w-3 h-3" /> This appointment will sync to your Google Calendar automatically.
+            </p>
+          )}
         </div>
       </Modal>
 
@@ -430,7 +576,8 @@ export default function CalendarPage() {
             <button onClick={() => setShowTravelModal(false)} className="btn-secondary">Cancel</button>
             <button onClick={handleSaveTravelPlan} className="btn-primary">Save</button>
           </>
-        }>
+        }
+      >
         <div className="space-y-3">
           <div>
             <label className="label">City *</label>

@@ -3,11 +3,12 @@ import {
   LayoutDashboard, Package, ShoppingCart, FileText, BarChart2,
   Truck, BookOpen, Receipt, Zap, LogOut, Moon, RotateCcw,
   CalendarDays, CircleUser as UserCircle2, Settings,
-  CreditCard, PackageCheck, Pencil, X, CheckCircle, Eye, EyeOff, ArrowLeftRight
+  CreditCard, PackageCheck, Pencil, X, CheckCircle, Eye, EyeOff, ArrowLeftRight,
+  Bell, ExternalLink, Trash2
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
-import type { ActivePage } from '../../types';
+import type { ActivePage, Reminder } from '../../types';
 
 interface SidebarProps {
   activePage: ActivePage;
@@ -17,6 +18,9 @@ interface SidebarProps {
 export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
   const { profile, isAdmin, canAccessFinance, canAccessSales, canAccessInventory, canAccessExpenses, signOut } = useAuth();
   const [unpaidInvoices, setUnpaidInvoices] = useState(0);
+  const [unreadReminders, setUnreadReminders] = useState(0);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [showReminders, setShowReminders] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [profileName, setProfileName] = useState('');
   const [profilePwd, setProfilePwd] = useState('');
@@ -27,14 +31,50 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
 
   useEffect(() => {
     const loadBadges = async () => {
-      const { count } = await supabase
-        .from('invoices')
-        .select('id', { count: 'exact', head: true })
-        .not('status', 'eq', 'cancelled');
-      setUnpaidInvoices(count || 0);
+      const [invoiceRes, reminderRes] = await Promise.all([
+        supabase.from('invoices').select('id', { count: 'exact', head: true }).not('status', 'eq', 'cancelled'),
+        supabase.from('reminders').select('id', { count: 'exact', head: true }).eq('is_read', false),
+      ]);
+      setUnpaidInvoices(invoiceRes.count || 0);
+      setUnreadReminders(reminderRes.count || 0);
     };
     loadBadges();
+    // Poll reminders every 60s
+    const interval = setInterval(loadBadges, 60000);
+    return () => clearInterval(interval);
   }, []);
+
+  const openReminders = async () => {
+    const { data } = await supabase
+      .from('reminders')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(30);
+    setReminders((data || []) as Reminder[]);
+    setShowReminders(true);
+  };
+
+  const markRead = async (id: string) => {
+    await supabase.from('reminders').update({ is_read: true }).eq('id', id);
+    setReminders(r => r.map(x => x.id === id ? { ...x, is_read: true } : x));
+    setUnreadReminders(n => Math.max(0, n - 1));
+  };
+
+  const markAllRead = async () => {
+    await supabase.from('reminders').update({ is_read: true }).eq('is_read', false);
+    setReminders(r => r.map(x => ({ ...x, is_read: true })));
+    setUnreadReminders(0);
+  };
+
+  const deleteReminder = async (id: string) => {
+    await supabase.from('reminders').delete().eq('id', id);
+    setReminders(r => r.filter(x => x.id !== id));
+  };
+
+  const formatReminderTime = (iso: string) => {
+    const d = new Date(iso);
+    return d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true });
+  };
 
   const openProfile = () => {
     setProfileName(profile?.display_name || '');
@@ -190,6 +230,21 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
         </nav>
 
         <div className="p-2 border-t border-neutral-100">
+          {/* Notification bell */}
+          <button
+            onClick={openReminders}
+            className="w-full flex items-center gap-2 mb-1 px-2.5 py-1.5 rounded-lg hover:bg-neutral-50 transition-colors text-left"
+          >
+            <div className="relative">
+              <Bell className="w-3.5 h-3.5 text-neutral-400" />
+              {unreadReminders > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-3.5 px-0.5 bg-error-600 text-white text-[8px] font-bold rounded-full flex items-center justify-center leading-none">
+                  {unreadReminders > 9 ? '9+' : unreadReminders}
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] text-neutral-500">Notifications</span>
+          </button>
           <button
             onClick={openProfile}
             className="w-full flex items-center gap-2 mb-1 px-1 py-1 rounded-lg hover:bg-neutral-50 transition-colors group text-left"
@@ -215,6 +270,77 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
           </button>
         </div>
       </aside>
+
+      {showReminders && (
+        <div className="fixed inset-0 z-[100] flex items-start justify-start">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setShowReminders(false)} />
+          <div className="relative ml-48 mt-0 bg-white border-r border-neutral-200 shadow-2xl w-80 h-full flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-100">
+              <div>
+                <h2 className="text-sm font-bold text-neutral-900">Notifications</h2>
+                {unreadReminders > 0 && (
+                  <p className="text-[10px] text-neutral-400">{unreadReminders} unread</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {unreadReminders > 0 && (
+                  <button onClick={markAllRead} className="text-[10px] text-primary-600 hover:underline">Mark all read</button>
+                )}
+                <button onClick={() => setShowReminders(false)} className="p-1 rounded hover:bg-neutral-100">
+                  <X className="w-4 h-4 text-neutral-500" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {reminders.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-neutral-300">
+                  <Bell className="w-8 h-8 mb-2" />
+                  <p className="text-xs text-neutral-400">No notifications yet</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-neutral-50">
+                  {reminders.map(r => (
+                    <div key={r.id} className={`px-4 py-3 ${r.is_read ? 'bg-white' : 'bg-primary-50'}`}>
+                      <div className="flex items-start gap-2">
+                        <div className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${r.is_read ? 'bg-neutral-200' : 'bg-primary-500'}`} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-neutral-800 leading-snug">{r.message}</p>
+                          <p className="text-[9px] text-neutral-400 mt-0.5">{formatReminderTime(r.created_at)}</p>
+                          {r.rule_name && (
+                            <p className="text-[9px] text-primary-500 mt-0.5">Rule: {r.rule_name}</p>
+                          )}
+                          <div className="flex items-center gap-2 mt-1.5">
+                            {r.action_url && (
+                              <a
+                                href={r.action_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={() => markRead(r.id)}
+                                className="flex items-center gap-1 text-[10px] text-blue-600 hover:text-blue-700 font-medium"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                {r.action_type === 'send_whatsapp' ? 'Open WhatsApp' : r.action_type === 'send_email' ? 'Send Email' : 'Open'}
+                              </a>
+                            )}
+                            {!r.is_read && (
+                              <button onClick={() => markRead(r.id)} className="text-[10px] text-neutral-400 hover:text-neutral-600">
+                                Mark read
+                              </button>
+                            )}
+                            <button onClick={() => deleteReminder(r.id)} className="ml-auto text-neutral-300 hover:text-red-400">
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {showProfile && (
         <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center">
