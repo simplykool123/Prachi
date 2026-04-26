@@ -5,6 +5,7 @@ import { formatCurrency, formatDate, generateId, useVisibilityReload } from '../
 import { useCompanySettings } from '../lib/useCompanySettings';
 import Modal from '../components/ui/Modal';
 import EmptyState from '../components/ui/EmptyState';
+import { useAsyncAction } from '../hooks/useAsyncAction';
 import type { CourierEntry, DeliveryChallan } from '../types';
 import type { PageState } from '../App';
 
@@ -67,7 +68,7 @@ export default function Courier({ prefillFromDC }: CourierProps) {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<CourierEntry | null>(null);
   const [form, setForm] = useState({ ...emptyForm });
-  const [saving, setSaving] = useState(false);
+  const { saving, run: runSave } = useAsyncAction();
   const [printEntry, setPrintEntry] = useState<(CourierEntry & typeof emptyForm) | null>(null);
 
   useEffect(() => { loadData(); }, []);
@@ -227,8 +228,7 @@ export default function Courier({ prefillFromDC }: CourierProps) {
     }));
   };
 
-  const handleSave = async () => {
-    setSaving(true);
+  const handleSave = () => runSave(async () => {
     const payload = {
       courier_date: form.courier_date,
       customer_id: form.customer_id || null,
@@ -243,32 +243,32 @@ export default function Courier({ prefillFromDC }: CourierProps) {
       updated_at: new Date().toISOString(),
     };
     if (editing) {
-      await supabase.from('courier_entries').update(payload).eq('id', editing.id);
+      const { error } = await supabase.from('courier_entries').update(payload).eq('id', editing.id);
+      if (error) throw error;
     } else {
       const dispatch_number = generateId('DSP');
-      const { data: newEntry } = await supabase.from('courier_entries').insert({ ...payload, dispatch_number }).select().single();
+      const { data: newEntry, error } = await supabase.from('courier_entries').insert({ ...payload, dispatch_number }).select().single();
+      if (error) throw error;
       if (form.sales_order_id) {
         await supabase.from('sales_orders').update({ status: 'dispatched' }).eq('id', form.sales_order_id);
       }
-      // Auto-open label print after adding
       if (newEntry) {
         setPrintEntry({ ...newEntry, ...form } as CourierEntry & typeof emptyForm);
       }
     }
-    setSaving(false);
     setShowModal(false);
     loadData();
-  };
+  }, { success: editing ? 'Shipment updated' : 'Shipment added' });
 
   const updateStatus = async (id: string, status: string) => {
-    await supabase.from('courier_entries').update({ status }).eq('id', id);
-    loadData();
+    const { error } = await supabase.from('courier_entries').update({ status }).eq('id', id);
+    if (!error) loadData();
   };
 
   const deleteEntry = async (id: string) => {
     if (!window.confirm('Delete this shipment entry?')) return;
-    await supabase.from('courier_entries').delete().eq('id', id);
-    loadData();
+    const { error } = await supabase.from('courier_entries').delete().eq('id', id);
+    if (!error) loadData();
   };
 
   const openLabel = async (e: CourierEntry) => {

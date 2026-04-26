@@ -94,7 +94,7 @@ export async function onPaymentCreated(paymentId: string): Promise<void> {
 
   const { data: invoice } = await supabase
     .from('invoices')
-    .select('id, customer_name, total_amount, paid_amount, outstanding_amount, sales_order_id')
+    .select('id, invoice_number, customer_name, customer_phone, total_amount, paid_amount, outstanding_amount, sales_order_id')
     .eq('id', payment.invoice_id)
     .maybeSingle();
 
@@ -138,8 +138,8 @@ export async function onPaymentCreated(paymentId: string): Promise<void> {
     entity_id: paymentId,
     entity_name: `Payment for invoice`,
     customer_name: invoice.customer_name ?? '',
-    customer_phone: payment.party_name ?? '',
+    customer_phone: invoice.customer_phone ?? '',
     amount: payment.amount,
-    invoice_number: '',
+    invoice_number: invoice.invoice_number ?? '',
   });
 }

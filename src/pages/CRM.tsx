@@ -15,6 +15,9 @@ import ConfirmDialog from '../components/ui/ConfirmDialog';
 import StatusBadge from '../components/ui/StatusBadge';
 import { useDateRange } from '../contexts/DateRangeContext';
 import { createSalesOrder } from '../services/documentFlowService';
+import { useAsyncAction } from '../hooks/useAsyncAction';
+import { useToast } from '../components/ui/Toast';
+import { required } from '../lib/validate';
 import type {
   Customer, CrmNote, CrmFile, Appointment, TravelPlan, Invoice,
   SalesOrder, Payment, ProductRecommendation, Product, VastuPlan
@@ -51,6 +54,14 @@ type SalesSubTab = 'orders' | 'invoices' | 'payments';
 
 export default function CRM() {
   const { dateRange } = useDateRange();
+  const toast = useToast();
+  const { saving: savingCustomer, run: runCustomer } = useAsyncAction();
+  const { saving: savingAppt, run: runAppt } = useAsyncAction();
+  const { saving: savingNote, run: runNote } = useAsyncAction();
+  const { saving: savingRecommend, run: runRecommend } = useAsyncAction();
+  const { saving: savingVastu, run: runVastu } = useAsyncAction();
+  const { saving: savingCalAppt, run: runCalAppt } = useAsyncAction();
+  const { saving: savingTravel, run: runTravel } = useAsyncAction();
   const [activeTab, setActiveTab] = useState<ActiveTab>('clients');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState('');
@@ -227,9 +238,12 @@ export default function CRM() {
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
     const path = `documents/${customerId}/${Date.now()}_${safeName}`;
     const { error: uploadError } = await supabase.storage.from('customer-files').upload(path, file, { upsert: false });
-    if (!uploadError) {
+    if (uploadError) {
+      console.error('[CRM] document upload failed', uploadError);
+      toast.error('File upload failed. Please try again.');
+    } else {
       const { data: urlData } = supabase.storage.from('customer-files').getPublicUrl(path);
-      await supabase.from('customer_documents').insert({
+      const { error: dbError } = await supabase.from('customer_documents').insert({
         customer_id: customerId,
         file_name: file.name,
         file_url: urlData.publicUrl,
@@ -239,7 +253,13 @@ export default function CRM() {
         tag: docTag,
         notes: docNotes,
       });
-      loadCustomerDocs(customerId);
+      if (dbError) {
+        console.error('[CRM] document record insert failed', dbError);
+        toast.error('File uploaded but failed to save record.');
+      } else {
+        toast.success('Document uploaded');
+        loadCustomerDocs(customerId);
+      }
     }
     setUploadingDoc(false);
     setDocNotes('');
@@ -267,16 +287,20 @@ export default function CRM() {
     return Math.min(score, 100);
   };
 
-  const handleSaveCustomer = async () => {
-    await supabase.from('customers').insert({
-      name: form.name, phone: form.phone, alt_phone: form.alt_phone, email: form.email,
-      address: form.address, address2: form.address2, city: form.city, state: form.state, pincode: form.pincode,
-      category: form.category, notes: form.notes,
-      opening_balance: 0, balance: 0, total_revenue: 0, tags: form.tags,
-      conversion_stage: 'Lead',
-    });
-    setShowAddModal(false);
-    loadCustomers();
+  const handleSaveCustomer = () => {
+    if (!required(form.name)) { toast.error('Customer name is required'); return; }
+    runCustomer(async () => {
+      const { error } = await supabase.from('customers').insert({
+        name: form.name, phone: form.phone, alt_phone: form.alt_phone, email: form.email,
+        address: form.address, address2: form.address2, city: form.city, state: form.state, pincode: form.pincode,
+        category: form.category, notes: form.notes,
+        opening_balance: 0, balance: 0, total_revenue: 0, tags: form.tags,
+        conversion_stage: 'Lead',
+      });
+      if (error) throw error;
+      setShowAddModal(false);
+      loadCustomers();
+    }, { success: 'Client added' });
   };
 
   const handleEditCustomer = () => {
@@ -302,37 +326,40 @@ export default function CRM() {
     setShowEditCustomerModal(true);
   };
 
-  const handleUpdateCustomer = async () => {
+  const handleUpdateCustomer = () => {
     if (!selectedCustomer) return;
-    const totalRev = customerInvoices.filter(i => i.status === 'paid').reduce((s, i) => s + i.total_amount, 0);
-    const score = computeCustomerScore(
-      { ...selectedCustomer, conversion_stage: editCustomerForm.conversion_stage, next_followup_date: editCustomerForm.next_followup_date },
-      totalRev,
-      notes.length
-    );
-    await supabase.from('customers').update({
-      name: editCustomerForm.name,
-      phone: editCustomerForm.phone,
-      alt_phone: editCustomerForm.alt_phone,
-      email: editCustomerForm.email,
-      address: editCustomerForm.address,
-      address2: editCustomerForm.address2,
-      city: editCustomerForm.city,
-      state: editCustomerForm.state,
-      pincode: editCustomerForm.pincode,
-      category: editCustomerForm.category,
-      notes: editCustomerForm.notes,
-      project_status: editCustomerForm.project_status,
-      conversion_stage: editCustomerForm.conversion_stage,
-      project_value: parseFloat(editCustomerForm.project_value) || 0,
-      next_followup_date: editCustomerForm.next_followup_date || null,
-      customer_score: score,
-      tags: editCustomerForm.tags,
-    }).eq('id', selectedCustomer.id);
-    setShowEditCustomerModal(false);
-    const updated = { ...selectedCustomer, ...editCustomerForm, project_value: parseFloat(editCustomerForm.project_value) || 0, customer_score: score };
-    setSelectedCustomer(updated as Customer);
-    loadCustomers();
+    runCustomer(async () => {
+      const totalRev = customerInvoices.filter(i => i.status === 'paid').reduce((s, i) => s + i.total_amount, 0);
+      const score = computeCustomerScore(
+        { ...selectedCustomer, conversion_stage: editCustomerForm.conversion_stage, next_followup_date: editCustomerForm.next_followup_date },
+        totalRev,
+        notes.length
+      );
+      const { error } = await supabase.from('customers').update({
+        name: editCustomerForm.name,
+        phone: editCustomerForm.phone,
+        alt_phone: editCustomerForm.alt_phone,
+        email: editCustomerForm.email,
+        address: editCustomerForm.address,
+        address2: editCustomerForm.address2,
+        city: editCustomerForm.city,
+        state: editCustomerForm.state,
+        pincode: editCustomerForm.pincode,
+        category: editCustomerForm.category,
+        notes: editCustomerForm.notes,
+        project_status: editCustomerForm.project_status,
+        conversion_stage: editCustomerForm.conversion_stage,
+        project_value: parseFloat(editCustomerForm.project_value) || 0,
+        next_followup_date: editCustomerForm.next_followup_date || null,
+        customer_score: score,
+        tags: editCustomerForm.tags,
+      }).eq('id', selectedCustomer.id);
+      if (error) throw error;
+      setShowEditCustomerModal(false);
+      const updated = { ...selectedCustomer, ...editCustomerForm, project_value: parseFloat(editCustomerForm.project_value) || 0, customer_score: score };
+      setSelectedCustomer(updated as Customer);
+      loadCustomers();
+    }, { success: 'Client updated' });
   };
 
   const handleDeactivateCustomer = async () => {
@@ -342,26 +369,30 @@ export default function CRM() {
     loadCustomers();
   };
 
-  const handleSaveNote = async () => {
+  const handleSaveNote = () => {
     if (!selectedCustomer) return;
-    if (editingNote) {
-      await supabase.from('crm_notes').update({
-        note_type: noteForm.note_type, title: noteForm.title, content: noteForm.content,
-      }).eq('id', editingNote.id);
-      setEditingNote(null);
-    } else {
-      await supabase.from('crm_notes').insert({
-        customer_id: selectedCustomer.id,
-        note_type: noteForm.note_type, title: noteForm.title, content: noteForm.content,
-        note_date: new Date().toISOString(),
-      });
-      await supabase.from('customers').update({
-        last_interaction: new Date().toISOString(),
-        last_interaction_date: new Date().toISOString().split('T')[0],
-      }).eq('id', selectedCustomer.id);
-    }
-    setShowNoteModal(false);
-    loadCustomerDetail(selectedCustomer);
+    runNote(async () => {
+      if (editingNote) {
+        const { error } = await supabase.from('crm_notes').update({
+          note_type: noteForm.note_type, title: noteForm.title, content: noteForm.content,
+        }).eq('id', editingNote.id);
+        if (error) throw error;
+        setEditingNote(null);
+      } else {
+        const { error } = await supabase.from('crm_notes').insert({
+          customer_id: selectedCustomer.id,
+          note_type: noteForm.note_type, title: noteForm.title, content: noteForm.content,
+          note_date: new Date().toISOString(),
+        });
+        if (error) throw error;
+        await supabase.from('customers').update({
+          last_interaction: new Date().toISOString(),
+          last_interaction_date: new Date().toISOString().split('T')[0],
+        }).eq('id', selectedCustomer.id);
+      }
+      setShowNoteModal(false);
+      loadCustomerDetail(selectedCustomer);
+    }, { success: 'Note saved' });
   };
 
   const handleDeleteNote = async () => {
@@ -371,30 +402,36 @@ export default function CRM() {
     loadCustomerDetail(selectedCustomer);
   };
 
-  const handleSaveAppt = async () => {
+  const handleSaveAppt = () => {
     if (!selectedCustomer) return;
-    if (editingAppt) {
-      await supabase.from('appointments').update({
-        title: apptForm.title, appointment_type: apptForm.appointment_type,
-        start_time: `${apptForm.date}T${apptForm.start_time}:00`,
-        end_time: `${apptForm.date}T${apptForm.end_time}:00`,
-        location: apptForm.location, city: apptForm.city, notes: apptForm.notes,
-      }).eq('id', editingAppt.id);
-      setEditingAppt(null);
-    } else {
-      await supabase.from('appointments').insert({
-        title: apptForm.title, customer_id: selectedCustomer.id, customer_name: selectedCustomer.name,
-        appointment_type: apptForm.appointment_type,
-        start_time: `${apptForm.date}T${apptForm.start_time}:00`,
-        end_time: `${apptForm.date}T${apptForm.end_time}:00`,
-        location: apptForm.location, city: apptForm.city, status: 'scheduled', notes: apptForm.notes,
-      });
-      await supabase.from('customers').update({
-        last_interaction_date: new Date().toISOString().split('T')[0],
-      }).eq('id', selectedCustomer.id);
-    }
-    setShowApptModal(false);
-    loadCustomerDetail(selectedCustomer);
+    if (!required(apptForm.title)) { toast.error('Appointment title is required'); return; }
+    if (!apptForm.date) { toast.error('Appointment date is required'); return; }
+    runAppt(async () => {
+      if (editingAppt) {
+        const { error } = await supabase.from('appointments').update({
+          title: apptForm.title, appointment_type: apptForm.appointment_type,
+          start_time: `${apptForm.date}T${apptForm.start_time}:00`,
+          end_time: `${apptForm.date}T${apptForm.end_time}:00`,
+          location: apptForm.location, city: apptForm.city, notes: apptForm.notes,
+        }).eq('id', editingAppt.id);
+        if (error) throw error;
+        setEditingAppt(null);
+      } else {
+        const { error } = await supabase.from('appointments').insert({
+          title: apptForm.title, customer_id: selectedCustomer.id, customer_name: selectedCustomer.name,
+          appointment_type: apptForm.appointment_type,
+          start_time: `${apptForm.date}T${apptForm.start_time}:00`,
+          end_time: `${apptForm.date}T${apptForm.end_time}:00`,
+          location: apptForm.location, city: apptForm.city, status: 'scheduled', notes: apptForm.notes,
+        });
+        if (error) throw error;
+        await supabase.from('customers').update({
+          last_interaction_date: new Date().toISOString().split('T')[0],
+        }).eq('id', selectedCustomer.id);
+      }
+      setShowApptModal(false);
+      loadCustomerDetail(selectedCustomer);
+    }, { success: 'Appointment saved' });
   };
 
   const handleEditAppt = (appt: Appointment) => {
@@ -416,46 +453,56 @@ export default function CRM() {
     loadCustomerDetail(selectedCustomer);
   };
 
-  const handleSaveRecommendation = async () => {
+  const handleSaveRecommendation = () => {
     if (!selectedCustomer) return;
-    if (editingRecommend) {
-      await supabase.from('product_recommendations').update({
-        product_name: recommendForm.product_name, product_id: recommendForm.product_id || null,
-        direction: recommendForm.direction, recommended_quantity: recommendForm.recommended_quantity,
-        notes: recommendForm.notes, status: recommendForm.status,
-      }).eq('id', editingRecommend.id);
-      setEditingRecommend(null);
-    } else {
-      await supabase.from('product_recommendations').insert({
-        customer_id: selectedCustomer.id,
-        product_name: recommendForm.product_name, product_id: recommendForm.product_id || null,
-        direction: recommendForm.direction, recommended_quantity: recommendForm.recommended_quantity,
-        notes: recommendForm.notes, status: recommendForm.status,
-        recommended_date: new Date().toISOString().split('T')[0],
-      });
-    }
-    setShowRecommendModal(false);
-    loadCustomerDetail(selectedCustomer);
+    if (!required(recommendForm.product_name)) { toast.error('Product name is required'); return; }
+    runRecommend(async () => {
+      let error;
+      if (editingRecommend) {
+        ({ error } = await supabase.from('product_recommendations').update({
+          product_name: recommendForm.product_name, product_id: recommendForm.product_id || null,
+          direction: recommendForm.direction, recommended_quantity: recommendForm.recommended_quantity,
+          notes: recommendForm.notes, status: recommendForm.status,
+        }).eq('id', editingRecommend.id));
+        setEditingRecommend(null);
+      } else {
+        ({ error } = await supabase.from('product_recommendations').insert({
+          customer_id: selectedCustomer.id,
+          product_name: recommendForm.product_name, product_id: recommendForm.product_id || null,
+          direction: recommendForm.direction, recommended_quantity: recommendForm.recommended_quantity,
+          notes: recommendForm.notes, status: recommendForm.status,
+          recommended_date: new Date().toISOString().split('T')[0],
+        }));
+      }
+      if (error) throw error;
+      setShowRecommendModal(false);
+      loadCustomerDetail(selectedCustomer);
+    }, { success: 'Recommendation saved' });
   };
 
-  const handleSaveVastu = async () => {
+  const handleSaveVastu = () => {
     if (!selectedCustomer) return;
-    const payload = {
-      direction: vastuForm.direction,
-      product_id: vastuForm.product_id || null,
-      product_name: vastuForm.product_name,
-      quantity: vastuForm.quantity,
-      notes: vastuForm.notes,
-      status: vastuForm.status,
-    };
-    if (editingVastu) {
-      await supabase.from('vastu_plans').update(payload).eq('id', editingVastu.id);
-      setEditingVastu(null);
-    } else {
-      await supabase.from('vastu_plans').insert({ ...payload, customer_id: selectedCustomer.id });
-    }
-    setShowVastuModal(false);
-    loadCustomerDetail(selectedCustomer);
+    if (!required(vastuForm.product_name)) { toast.error('Product name is required'); return; }
+    runVastu(async () => {
+      const payload = {
+        direction: vastuForm.direction,
+        product_id: vastuForm.product_id || null,
+        product_name: vastuForm.product_name,
+        quantity: vastuForm.quantity,
+        notes: vastuForm.notes,
+        status: vastuForm.status,
+      };
+      let error;
+      if (editingVastu) {
+        ({ error } = await supabase.from('vastu_plans').update(payload).eq('id', editingVastu.id));
+        setEditingVastu(null);
+      } else {
+        ({ error } = await supabase.from('vastu_plans').insert({ ...payload, customer_id: selectedCustomer.id }));
+      }
+      if (error) throw error;
+      setShowVastuModal(false);
+      loadCustomerDetail(selectedCustomer);
+    }, { success: 'Vastu plan saved' });
   };
 
   const handleDeleteVastu = async () => {
@@ -501,26 +548,31 @@ export default function CRM() {
     }
   };
 
-  const handleSaveCalAppt = async () => {
-    const customer = calCustomers.find(c => c.id === calApptForm.customer_id);
-    await supabase.from('appointments').insert({
-      title: calApptForm.title,
-      customer_id: calApptForm.customer_id || null,
-      customer_name: customer?.name || '',
-      appointment_type: calApptForm.appointment_type,
-      start_time: `${calApptForm.date}T${calApptForm.start_time}:00`,
-      end_time: `${calApptForm.date}T${calApptForm.end_time}:00`,
-      location: calApptForm.location, city: calApptForm.city, status: 'scheduled', notes: calApptForm.notes,
-    });
-    setShowCalApptModal(false);
-    loadCalendarData();
+  const handleSaveCalAppt = () => {
+    if (!required(calApptForm.title)) { toast.error('Appointment title is required'); return; }
+    runCalAppt(async () => {
+      const customer = calCustomers.find(c => c.id === calApptForm.customer_id);
+      const { error } = await supabase.from('appointments').insert({
+        title: calApptForm.title,
+        customer_id: calApptForm.customer_id || null,
+        customer_name: customer?.name || '',
+        appointment_type: calApptForm.appointment_type,
+        start_time: `${calApptForm.date}T${calApptForm.start_time}:00`,
+        end_time: `${calApptForm.date}T${calApptForm.end_time}:00`,
+        location: calApptForm.location, city: calApptForm.city, status: 'scheduled', notes: calApptForm.notes,
+      });
+      if (error) throw error;
+      setShowCalApptModal(false);
+      loadCalendarData();
+    }, { success: 'Appointment scheduled' });
   };
 
-  const handleSaveTravelPlan = async () => {
-    await supabase.from('travel_plans').insert(travelForm);
+  const handleSaveTravelPlan = () => runTravel(async () => {
+    const { error } = await supabase.from('travel_plans').insert(travelForm);
+    if (error) throw error;
     setShowTravelModal(false);
     loadCalendarData();
-  };
+  }, { success: 'Travel plan saved' });
 
   const handleExportCSV = () => {
     const data = filtered.map(c => ({
@@ -1292,7 +1344,7 @@ export default function CRM() {
         </div>
 
         <Modal isOpen={showNoteModal} onClose={() => { setShowNoteModal(false); setEditingNote(null); }} title={editingNote ? 'Edit Interaction' : 'Add Interaction'} size="md"
-          footer={<><button onClick={() => { setShowNoteModal(false); setEditingNote(null); }} className="btn-secondary">Cancel</button><button onClick={handleSaveNote} className="btn-primary">{editingNote ? 'Update' : 'Save'}</button></>}>
+          footer={<><button onClick={() => { setShowNoteModal(false); setEditingNote(null); }} className="btn-secondary">Cancel</button><button onClick={handleSaveNote} disabled={savingNote} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">{savingNote ? 'Saving…' : editingNote ? 'Update' : 'Save'}</button></>}>
           <div className="space-y-3">
             <div>
               <label className="label">Interaction Type</label>
@@ -1312,7 +1364,7 @@ export default function CRM() {
         </Modal>
 
         <Modal isOpen={showApptModal} onClose={() => { setShowApptModal(false); setEditingAppt(null); }} title={editingAppt ? 'Edit Appointment' : 'Schedule Appointment'} size="md"
-          footer={<><button onClick={() => { setShowApptModal(false); setEditingAppt(null); }} className="btn-secondary">Cancel</button><button onClick={handleSaveAppt} className="btn-primary">{editingAppt ? 'Update' : 'Schedule'}</button></>}>
+          footer={<><button onClick={() => { setShowApptModal(false); setEditingAppt(null); }} className="btn-secondary">Cancel</button><button onClick={handleSaveAppt} disabled={savingAppt} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">{savingAppt ? 'Saving…' : editingAppt ? 'Update' : 'Schedule'}</button></>}>
           <div className="space-y-3">
             <div>
               <label className="label">Title *</label>
@@ -1354,7 +1406,7 @@ export default function CRM() {
         </Modal>
 
         <Modal isOpen={showVastuModal} onClose={() => { setShowVastuModal(false); setEditingVastu(null); }} title={editingVastu ? 'Edit Vastu Item' : 'Add Vastu Plan Item'} size="md"
-          footer={<><button onClick={() => { setShowVastuModal(false); setEditingVastu(null); }} className="btn-secondary">Cancel</button><button onClick={handleSaveVastu} className="btn-primary">{editingVastu ? 'Update' : 'Add Item'}</button></>}>
+          footer={<><button onClick={() => { setShowVastuModal(false); setEditingVastu(null); }} className="btn-secondary">Cancel</button><button onClick={handleSaveVastu} disabled={savingVastu} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">{savingVastu ? 'Saving…' : editingVastu ? 'Update' : 'Add Item'}</button></>}>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -1423,7 +1475,7 @@ export default function CRM() {
         </Modal>
 
         <Modal isOpen={showRecommendModal} onClose={() => { setShowRecommendModal(false); setEditingRecommend(null); }} title={editingRecommend ? 'Edit Recommendation' : 'Add Recommendation'} size="md"
-          footer={<><button onClick={() => { setShowRecommendModal(false); setEditingRecommend(null); }} className="btn-secondary">Cancel</button><button onClick={handleSaveRecommendation} className="btn-primary">{editingRecommend ? 'Update' : 'Save'}</button></>}>
+          footer={<><button onClick={() => { setShowRecommendModal(false); setEditingRecommend(null); }} className="btn-secondary">Cancel</button><button onClick={handleSaveRecommendation} disabled={savingRecommend} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">{savingRecommend ? 'Saving…' : editingRecommend ? 'Update' : 'Save'}</button></>}>
           <div className="space-y-3">
             <div>
               <label className="label">Product Name *</label>
@@ -1465,7 +1517,7 @@ export default function CRM() {
         </Modal>
 
         <Modal isOpen={showEditCustomerModal} onClose={() => setShowEditCustomerModal(false)} title="Edit Client" size="lg"
-          footer={<><button onClick={() => setShowEditCustomerModal(false)} className="btn-secondary">Cancel</button><button onClick={handleUpdateCustomer} className="btn-primary">Save Changes</button></>}>
+          footer={<><button onClick={() => setShowEditCustomerModal(false)} className="btn-secondary">Cancel</button><button onClick={handleUpdateCustomer} disabled={savingCustomer} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">{savingCustomer ? 'Saving…' : 'Save Changes'}</button></>}>
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2">
               <label className="label">Name *</label>
@@ -1844,7 +1896,7 @@ export default function CRM() {
       )}
 
       <Modal isOpen={showAddModal} onClose={() => setShowAddModal(false)} title="Add Client" size="lg"
-        footer={<><button onClick={() => setShowAddModal(false)} className="btn-secondary">Cancel</button><button onClick={handleSaveCustomer} className="btn-primary">Add Client</button></>}>
+        footer={<><button onClick={() => setShowAddModal(false)} className="btn-secondary">Cancel</button><button onClick={handleSaveCustomer} disabled={savingCustomer} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">{savingCustomer ? 'Adding…' : 'Add Client'}</button></>}>
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
             <label className="label">Name *</label>
@@ -1919,7 +1971,7 @@ export default function CRM() {
       </Modal>
 
       <Modal isOpen={showCalApptModal} onClose={() => setShowCalApptModal(false)} title="Schedule Appointment" size="md"
-        footer={<><button onClick={() => setShowCalApptModal(false)} className="btn-secondary">Cancel</button><button onClick={handleSaveCalAppt} className="btn-primary">Schedule</button></>}>
+        footer={<><button onClick={() => setShowCalApptModal(false)} className="btn-secondary">Cancel</button><button onClick={handleSaveCalAppt} disabled={savingCalAppt} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">{savingCalAppt ? 'Scheduling…' : 'Schedule'}</button></>}>
         <div className="space-y-3">
           <div>
             <label className="label">Title *</label>
@@ -1970,7 +2022,7 @@ export default function CRM() {
       </Modal>
 
       <Modal isOpen={showTravelModal} onClose={() => setShowTravelModal(false)} title="Add Travel Plan" size="sm"
-        footer={<><button onClick={() => setShowTravelModal(false)} className="btn-secondary">Cancel</button><button onClick={handleSaveTravelPlan} className="btn-primary">Save</button></>}>
+        footer={<><button onClick={() => setShowTravelModal(false)} className="btn-secondary">Cancel</button><button onClick={handleSaveTravelPlan} disabled={savingTravel} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">{savingTravel ? 'Saving…' : 'Save'}</button></>}>
         <div className="space-y-3">
           <div>
             <label className="label">City *</label>

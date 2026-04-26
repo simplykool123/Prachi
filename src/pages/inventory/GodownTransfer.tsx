@@ -6,6 +6,8 @@ import Modal from '../../components/ui/Modal';
 import EmptyState from '../../components/ui/EmptyState';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { useDateRange } from '../../contexts/DateRangeContext';
+import { useAsyncAction } from '../../hooks/useAsyncAction';
+import { useToast } from '../../components/ui/Toast';
 import type { Godown } from '../../types';
 import { processStockMovement } from '../../services/stockService';
 
@@ -69,7 +71,8 @@ export default function GodownTransfer() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const { saving, run: runSave } = useAsyncAction();
+  const toast = useToast();
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [rowDetails, setRowDetails] = useState<Record<string, TransferDetail[]>>({});
   const [godownStockMap, setGodownStockMap] = useState<Record<string, Record<string, number>>>({});
@@ -198,31 +201,30 @@ export default function GodownTransfer() {
     setExpandedRows(next);
   };
 
-  const handleSave = async () => {
+  const handleSave = () => {
     const validItems = items.filter(i => i.product_id && parseFloat(i.quantity) > 0);
     if (!form.from_godown_id || !form.to_godown_id || validItems.length === 0) return;
     if (form.from_godown_id === form.to_godown_id) {
-      alert('From and To godowns cannot be the same.');
+      toast.error('From and To godowns cannot be the same.');
       return;
     }
 
-    const errors: string[] = [];
+    const stockErrors: string[] = [];
     const fromMap = godownStockMap[form.from_godown_id] || {};
     for (const item of validItems) {
       const qty = parseFloat(item.quantity);
       const avail = getAvailableQty(fromMap, item.product_id, item.variant_id);
       const label = item.variant_name ? `${item.product_name} (${item.variant_name})` : item.product_name;
       if (qty > avail) {
-        errors.push(`${label}: only ${avail} available, requested ${qty}`);
+        stockErrors.push(`${label}: only ${avail} available, requested ${qty}`);
       }
     }
-    if (errors.length > 0) {
-      alert('Insufficient stock:\n' + errors.join('\n'));
+    if (stockErrors.length > 0) {
+      toast.error('Insufficient stock: ' + stockErrors.join('; '));
       return;
     }
 
-    setSaving(true);
-    try {
+    runSave(async () => {
       const fromGodown = godowns.find(g => g.id === form.from_godown_id);
       const toGodown = godowns.find(g => g.id === form.to_godown_id);
       const transferNumber = await nextDocNumber('TRF', supabase);
@@ -294,11 +296,7 @@ export default function GodownTransfer() {
       setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', available_qty: 0 }]);
       setGodownStockMap({});
       loadData();
-    } catch (err) {
-      console.error('Failed to save transfer:', err);
-    } finally {
-      setSaving(false);
-    }
+    }, { success: 'Transfer saved successfully' });
   };
   const handleExport = () => {
     exportToCSV(

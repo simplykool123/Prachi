@@ -5,6 +5,8 @@ import { formatCurrency, formatDate, generateId, exportToCSV } from '../../lib/u
 import { useDateRange } from '../../contexts/DateRangeContext';
 import Modal from '../../components/ui/Modal';
 import EmptyState from '../../components/ui/EmptyState';
+import { useAsyncAction } from '../../hooks/useAsyncAction';
+import { required, positiveNumber } from '../../lib/validate';
 import type { Expense } from '../../types';
 
 const CATEGORIES = ['Rent', 'Travel', 'Marketing', 'Courier', 'Utilities', 'Supplies', 'Salary', 'Miscellaneous'] as const;
@@ -43,7 +45,8 @@ export default function Expenses() {
   const [form, setForm] = useState({ ...emptyForm });
   const [uploading, setUploading] = useState<Record<string, boolean>>({});
   const [lightbox, setLightbox] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const { saving, run: runSave } = useAsyncAction();
+  const { saving: deleting, run: runDelete } = useAsyncAction();
   const fileRefs = {
     receipt_image_url:      useRef<HTMLInputElement>(null),
     product_image_url:      useRef<HTMLInputElement>(null),
@@ -109,38 +112,43 @@ export default function Expenses() {
     setForm(f => ({ ...f, [slot]: '' }));
   };
 
-  const handleSave = async () => {
-    const payload = {
-      expense_date: form.expense_date,
-      category: form.category,
-      description: form.description,
-      amount: parseFloat(form.amount) || 0,
-      payment_mode: form.payment_mode,
-      reference_number: form.reference_number || null,
-      notes: form.notes || null,
-      receipt_image_url: form.receipt_image_url || null,
-      product_image_url: form.product_image_url || null,
-      payment_screenshot_url: form.payment_screenshot_url || null,
-    };
-    if (editingExpense) {
-      await supabase.from('expenses').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', editingExpense.id);
-    } else {
-      await supabase.from('expenses').insert({ expense_number: generateId('EXP'), ...payload });
-    }
-    setShowModal(false);
-    loadExpenses();
-  };
+  const isFormValid = required(form.description) && positiveNumber(form.amount);
 
-  const handleDelete = async (e: Expense) => {
-    setDeleting(true);
-    try {
-      // Delete attached images from storage first
+  const handleSave = () => runSave(
+    async () => {
+      const payload = {
+        expense_date: form.expense_date,
+        category: form.category,
+        description: form.description,
+        amount: parseFloat(form.amount),
+        payment_mode: form.payment_mode,
+        reference_number: form.reference_number || null,
+        notes: form.notes || null,
+        receipt_image_url: form.receipt_image_url || null,
+        product_image_url: form.product_image_url || null,
+        payment_screenshot_url: form.payment_screenshot_url || null,
+      };
+      let error;
+      if (editingExpense) {
+        ({ error } = await supabase.from('expenses').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', editingExpense.id));
+      } else {
+        ({ error } = await supabase.from('expenses').insert({ expense_number: generateId('EXP'), ...payload }));
+      }
+      if (error) throw error;
+      setShowModal(false);
+      loadExpenses();
+    },
+    { success: editingExpense ? 'Expense updated' : 'Expense saved' }
+  );
+
+  const handleDelete = (e: Expense) => runDelete(
+    async () => {
       const paths: string[] = [];
       for (const key of ['receipt_image_url', 'product_image_url', 'payment_screenshot_url'] as const) {
         const url = (e as Record<string, any>)[key];
         if (url) {
           const segment = url.split('/expense-receipts/')[1];
-          if (segment) paths.push(segment.split('?')[0]); // strip any query params
+          if (segment) paths.push(segment.split('?')[0]);
         }
       }
       if (paths.length > 0) {
@@ -148,14 +156,11 @@ export default function Expenses() {
       }
       const { error } = await supabase.from('expenses').delete().eq('id', e.id);
       if (error) throw error;
-    } catch (err) {
-      console.error('Delete failed:', err);
-    } finally {
-      setDeleting(false);
       setConfirmExpense(null);
       loadExpenses();
-    }
-  };
+    },
+    { success: 'Expense deleted' }
+  );
 
   const handleExport = () => {
     exportToCSV(filtered.map(e => ({
@@ -387,8 +392,12 @@ export default function Expenses() {
         title={editingExpense ? 'Edit Expense' : 'Add Expense'} size="lg"
         footer={<>
           <button onClick={() => setShowModal(false)} className="btn-secondary">Cancel</button>
-          <button onClick={handleSave} disabled={Object.values(uploading).some(Boolean)} className="btn-primary">
-            {Object.values(uploading).some(Boolean) ? 'Uploading...' : editingExpense ? 'Update' : 'Save Expense'}
+          <button
+            onClick={handleSave}
+            disabled={saving || !isFormValid || Object.values(uploading).some(Boolean)}
+            className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {Object.values(uploading).some(Boolean) ? 'Uploading…' : saving ? 'Saving…' : editingExpense ? 'Update' : 'Save Expense'}
           </button>
         </>}>
         <div className="space-y-3">

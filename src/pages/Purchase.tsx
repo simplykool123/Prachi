@@ -8,6 +8,8 @@ import EmptyState from '../components/ui/EmptyState';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { processStockMovement, addGemPieces } from '../services/stockService';
 import { useDateRange } from '../contexts/DateRangeContext';
+import { useAsyncAction } from '../hooks/useAsyncAction';
+import { useToast } from '../components/ui/Toast';
 import type { PurchaseEntry, PurchaseEntryItem, Product, ProductVariant, ProductType, Supplier, Godown } from '../types';
 
 type DeliveryStatus = 'Pending' | 'In Transit' | 'Delivered' | 'Delayed' | 'Cancelled';
@@ -74,6 +76,9 @@ type Tab = 'entries' | 'suppliers';
 export default function Purchase() {
   const { isAdmin } = useAuth();
   const { dateRange } = useDateRange();
+  const { saving, run: runSave } = useAsyncAction();
+  const { saving: savingSupplier, run: runSaveSupplier } = useAsyncAction();
+  const toast = useToast();
   const [tab, setTab] = useState<Tab>('entries');
   const [entries, setEntries] = useState<PurchaseEntry[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -304,7 +309,7 @@ export default function Purchase() {
 
     const hasOverReceive = receiveItems.some(i => (parseFloat(i.received_qty) || 0) > i.ordered_qty);
     if (hasOverReceive) {
-      alert('Received quantity cannot exceed ordered quantity.');
+      toast.error('Received quantity cannot exceed ordered quantity.');
       return;
     }
 
@@ -322,11 +327,11 @@ export default function Purchase() {
         .filter(w => Number.isFinite(w) && w > 0);
       const receivedQty = parseFloat(item.received_qty) || 0;
       if (parsedWeights.length === 0) {
-        alert(`Please enter one weight per line for gemstone product: ${item.product_name}`);
+        toast.error(`Please enter one weight per line for gemstone product: ${item.product_name}`);
         return;
       }
       if (parsedWeights.length !== receivedQty) {
-        alert(`${item.product_name}: you entered ${parsedWeights.length} piece weight(s) but received qty is ${receivedQty}. They must match.`);
+        toast.error(`${item.product_name}: you entered ${parsedWeights.length} piece weight(s) but received qty is ${receivedQty}. They must match.`);
         return;
       }
       const prod = products.find(p => p.id === item.product_id);
@@ -381,15 +386,16 @@ export default function Purchase() {
     loadData();
   };
 
-  const handleSave = async () => {
+  const handleSave = () => {
     // Validate gemstone lines have piece weights entered
     for (const item of items.filter(i => i.product_name && i.product_type === 'gemstone')) {
       const weights = parsePieceWeights(item.piece_weights || '');
       if (weights.length === 0) {
-        alert(`Please enter piece weights for gemstone product: ${item.product_name}`);
+        toast.error(`Please enter piece weights for gemstone product: ${item.product_name}`);
         return;
       }
     }
+    runSave(async () => {
 
     if (editingEntry) {
       await supabase.from('purchase_entries').update({
@@ -534,14 +540,15 @@ export default function Purchase() {
         }
       }
     }
-    setShowModal(false);
-    loadData();
+      setShowModal(false);
+      loadData();
+    }, { success: editingEntry ? 'Purchase updated' : 'Purchase saved' });
   };
 
   const handleDeleteEntry = async (entry: PurchaseEntry) => {
     const { error } = await supabase.rpc('cancel_purchase_entry', { p_entry_id: entry.id });
     if (error) {
-      alert(error.message);
+      toast.error(error.message);
       return;
     }
     loadData();
@@ -573,19 +580,21 @@ export default function Purchase() {
     setShowSupplierModal(true);
   };
 
-  const handleSaveSupplier = async () => {
+  const handleSaveSupplier = () => runSaveSupplier(async () => {
     const opening_balance = parseFloat(supplierForm.opening_balance) || 0;
     const { opening_balance: _ob, ...rest } = supplierForm;
+    let error;
     if (editingSupplier) {
-      await supabase.from('suppliers').update({ ...rest, opening_balance, updated_at: new Date().toISOString() }).eq('id', editingSupplier.id);
+      ({ error } = await supabase.from('suppliers').update({ ...rest, opening_balance, updated_at: new Date().toISOString() }).eq('id', editingSupplier.id));
     } else {
-      await supabase.from('suppliers').insert({ ...rest, opening_balance, balance: opening_balance });
+      ({ error } = await supabase.from('suppliers').insert({ ...rest, opening_balance, balance: opening_balance }));
     }
+    if (error) throw error;
     setShowSupplierModal(false);
     setEditingSupplier(null);
     setSupplierForm({ name: '', contact_person: '', phone: '', alt_phone: '', email: '', address: '', address2: '', city: '', state: '', pincode: '', gstin: '', notes: '', opening_balance: '0' });
     loadData();
-  };
+  }, { success: editingSupplier ? 'Supplier updated' : 'Supplier added' });
 
   const handleDeleteSupplier = async (s: Supplier) => {
     await supabase.from('suppliers').update({ is_active: false }).eq('id', s.id);
@@ -595,7 +604,7 @@ export default function Purchase() {
   const markPaid = async (entry: PurchaseEntry) => {
     const deliveryState = computeDeliveryStatus(entry);
     if (deliveryState !== 'Delivered') {
-      alert('Cannot mark as completed before stock is received into godown.');
+      toast.error('Cannot mark as completed before stock is received into godown.');
       return;
     }
     await supabase.from('purchase_entries').update({ status: 'paid', paid_amount: entry.total_amount, outstanding_amount: 0 }).eq('id', entry.id);
@@ -941,7 +950,7 @@ export default function Purchase() {
         footer={
           <>
             <button onClick={() => setShowModal(false)} className="btn-secondary">Cancel</button>
-            <button onClick={handleSave} className="btn-primary">{editingEntry ? 'Update Purchase' : 'Save Purchase'}</button>
+            <button onClick={handleSave} disabled={saving} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">{saving ? 'Saving…' : editingEntry ? 'Update Purchase' : 'Save Purchase'}</button>
           </>
         }>
         <div className="space-y-4">
@@ -1208,7 +1217,7 @@ export default function Purchase() {
         footer={
           <>
             <button onClick={() => setShowSupplierModal(false)} className="btn-secondary">Cancel</button>
-            <button onClick={handleSaveSupplier} className="btn-primary">{editingSupplier ? 'Update Supplier' : 'Add Supplier'}</button>
+            <button onClick={handleSaveSupplier} disabled={savingSupplier} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">{savingSupplier ? 'Saving…' : editingSupplier ? 'Update Supplier' : 'Add Supplier'}</button>
           </>
         }>
         <div className="grid grid-cols-2 gap-3">

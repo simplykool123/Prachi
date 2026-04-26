@@ -8,6 +8,7 @@ import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
 import ActionMenu, { actionView, actionEdit, actionDelete } from '../../components/ui/ActionMenu';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import { useAsyncAction } from '../../hooks/useAsyncAction';
 import type { SalesReturn, SalesReturnItem } from '../../types';
 import { processStockMovement } from '../../services/stockService';
 
@@ -37,6 +38,9 @@ interface ReturnLineItem {
 }
 
 export default function SalesReturns() {
+  const { saving: approving, run: runApprove } = useAsyncAction();
+  const { saving: processing, run: runProcess } = useAsyncAction();
+  const { saving: savingNew, run: runNew } = useAsyncAction();
   const { dateRange } = useDateRange();
   const [returns, setReturns] = useState<SalesReturn[]>([]);
   const [search, setSearch] = useState('');
@@ -142,10 +146,10 @@ export default function SalesReturns() {
   const totalAmount = items.reduce((s, i) => s + i.total_price, 0);
   const editTotalAmount = editItems.reduce((s, i) => s + i.total_price, 0);
 
-  const handleSave = async () => {
+  const handleSave = () => runNew(async () => {
     const inv = invoices.find(i => i.id === form.invoice_id);
     const returnNumber = await nextDocNumber('RET', supabase);
-    const { data: ret } = await supabase.from('sales_returns').insert({
+    const { data: ret, error: retErr } = await supabase.from('sales_returns').insert({
       return_number: returnNumber,
       invoice_id: form.invoice_id || null,
       customer_id: inv?.customer_id || null,
@@ -157,6 +161,7 @@ export default function SalesReturns() {
       credit_note_issued: false,
       notes: form.notes,
     }).select().single();
+    if (retErr) throw retErr;
 
     if (ret) {
       const returnItems = items.filter(i => i.product_name).map(i => ({
@@ -169,14 +174,15 @@ export default function SalesReturns() {
         total_price: i.total_price,
         return_to_stock: i.return_to_stock,
       }));
-      await supabase.from('sales_return_items').insert(returnItems);
+      const { error: itemsErr } = await supabase.from('sales_return_items').insert(returnItems);
+      if (itemsErr) throw itemsErr;
     }
 
     setShowModal(false);
     setForm({ invoice_id: '', customer_name: '', return_date: new Date().toISOString().split('T')[0], reason: '', notes: '' });
     setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', return_to_stock: true, total_price: 0 }]);
     loadData();
-  };
+  }, { success: 'Return created' });
 
   const openView = async (ret: SalesReturn) => {
     const { data } = await supabase.from('sales_return_items').select('*').eq('sales_return_id', ret.id);
@@ -247,12 +253,13 @@ export default function SalesReturns() {
     loadData();
   };
 
-  const handleApprove = async (ret: SalesReturn) => {
-    await supabase.from('sales_returns').update({ status: 'approved' }).eq('id', ret.id);
+  const handleApprove = (ret: SalesReturn) => runApprove(async () => {
+    const { error } = await supabase.from('sales_returns').update({ status: 'approved' }).eq('id', ret.id);
+    if (error) throw error;
     loadData();
-  };
+  }, { success: 'Return approved' });
 
-  const handleProcess = async (ret: SalesReturn) => {
+  const handleProcess = (ret: SalesReturn) => runProcess(async () => {
     let retItems = rowItems[ret.id];
     if (!retItems) {
       const { data, error } = await supabase.from('sales_return_items').select('*').eq('sales_return_id', ret.id);
@@ -326,7 +333,7 @@ export default function SalesReturns() {
     const { error: updErr } = await supabase.from('sales_returns').update({ status: 'processed' }).eq('id', ret.id);
     if (updErr) throw updErr;
     loadData();
-  };
+  }, { success: 'Return processed and stock updated' });
 
   const handleExportCSV = () => {
     exportToCSV(
@@ -422,15 +429,15 @@ export default function SalesReturns() {
                     <td className="table-cell text-right">
                       <div className="flex items-center justify-end gap-1">
                         {ret.status === 'pending' && (
-                          <button onClick={() => handleApprove(ret)}
-                            className="px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors">
-                            Approve
+                          <button onClick={() => handleApprove(ret)} disabled={approving}
+                            className="px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                            {approving ? '…' : 'Approve'}
                           </button>
                         )}
                         {ret.status === 'approved' && (
-                          <button onClick={() => handleProcess(ret)}
-                            className="px-2 py-1 rounded text-xs font-medium bg-success-50 text-success-600 hover:bg-green-100 transition-colors">
-                            Process &amp; Restock
+                          <button onClick={() => handleProcess(ret)} disabled={processing}
+                            className="px-2 py-1 rounded text-xs font-medium bg-success-50 text-success-600 hover:bg-green-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                            {processing ? '…' : 'Process & Restock'}
                           </button>
                         )}
                         <ActionMenu items={[
@@ -659,7 +666,7 @@ export default function SalesReturns() {
         footer={
           <>
             <button onClick={() => setShowModal(false)} className="btn-secondary">Cancel</button>
-            <button onClick={handleSave} className="btn-primary">Create Return</button>
+            <button onClick={handleSave} disabled={savingNew} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">{savingNew ? 'Creating…' : 'Create Return'}</button>
           </>
         }>
         <div className="space-y-4">

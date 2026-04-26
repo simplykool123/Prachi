@@ -11,6 +11,8 @@ import ChallanPrint from './ChallanPrint';
 import { fetchCompanies } from '../../lib/companiesService';
 import type { Company } from '../../lib/companiesService';
 import { createDeliveryChallan, cancelDeliveryChallan } from '../../services/documentFlowService';
+import { useAsyncAction } from '../../hooks/useAsyncAction';
+import { useToast } from '../../components/ui/Toast';
 import type { DeliveryChallan as DCType, SalesOrder, SalesOrderItem } from '../../types';
 import type { ActivePage } from '../../types';
 import type { PageState } from '../../App';
@@ -73,6 +75,9 @@ const emptyForm = {
 };
 
 export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
+  const { saving, run: runSave } = useAsyncAction();
+  const { saving: deleting, run: runDelete } = useAsyncAction();
+  const toast = useToast();
   const [challans, setChallans] = useState<DCType[]>([]);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -244,12 +249,12 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
 
   const subtotal = items.reduce((s, i) => s + i.total_price, 0);
 
-  const handleSave = async () => {
+  const handleSave = () => {
     if (!form.sales_order_id) {
-      alert('A Sales Order is required to create a Delivery Challan.');
+      toast.error('A Sales Order is required to create a Delivery Challan.');
       return;
     }
-    try {
+    runSave(async () => {
       const challanNumber = await nextDocNumber('DC', supabase);
       await createDeliveryChallan(form.sales_order_id, {
         challan_number: challanNumber,
@@ -261,48 +266,47 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
       });
       setShowModal(false);
       loadData();
-    } catch (err) {
-      console.error('Failed to create delivery challan:', err);
-      alert((err as Error).message || 'Failed to create delivery challan');
-    }
+    }, { success: 'Delivery challan created' });
   };
 
-  const handleEdit = async () => {
+  const handleEdit = () => {
     if (!editChallan) return;
-    await supabase.from('delivery_challans').update({
-      sales_order_id: form.sales_order_id || null,
-      customer_id: form.customer_id || null,
-      customer_name: form.customer_name,
-      customer_phone: form.customer_phone,
-      customer_address: form.customer_address,
-      customer_address2: form.customer_address2,
-      customer_city: form.customer_city,
-      customer_state: form.customer_state,
-      customer_pincode: form.customer_pincode,
-      challan_date: form.challan_date,
-      dispatch_mode: form.dispatch_mode,
-      courier_company: form.courier_company,
-      tracking_number: form.tracking_number,
-      notes: form.notes,
-    }).eq('id', editChallan.id);
-    await supabase.from('delivery_challan_items').delete().eq('delivery_challan_id', editChallan.id);
-    await supabase.from('delivery_challan_items').insert(
-      items.filter(i => i.product_name).map(i => ({
-        delivery_challan_id: editChallan.id,
-        product_id: i.product_id || null,
-        product_name: i.product_name,
-        unit: i.unit,
-        quantity: parseFloat(i.quantity) || 0,
-        unit_price: parseFloat(i.unit_price) || 0,
-        discount_pct: parseFloat(i.discount_pct) || 0,
-        total_price: i.total_price,
-        gemstone_weight: (i.gemstone_weight || 0) > 0 ? i.gemstone_weight : null,
-        variant_id: i.variant_id || null,
-      }))
-    );
-    setShowModal(false);
-    setEditChallan(null);
-    loadData();
+    runSave(async () => {
+      await supabase.from('delivery_challans').update({
+        sales_order_id: form.sales_order_id || null,
+        customer_id: form.customer_id || null,
+        customer_name: form.customer_name,
+        customer_phone: form.customer_phone,
+        customer_address: form.customer_address,
+        customer_address2: form.customer_address2,
+        customer_city: form.customer_city,
+        customer_state: form.customer_state,
+        customer_pincode: form.customer_pincode,
+        challan_date: form.challan_date,
+        dispatch_mode: form.dispatch_mode,
+        courier_company: form.courier_company,
+        tracking_number: form.tracking_number,
+        notes: form.notes,
+      }).eq('id', editChallan.id);
+      await supabase.from('delivery_challan_items').delete().eq('delivery_challan_id', editChallan.id);
+      await supabase.from('delivery_challan_items').insert(
+        items.filter(i => i.product_name).map(i => ({
+          delivery_challan_id: editChallan.id,
+          product_id: i.product_id || null,
+          product_name: i.product_name,
+          unit: i.unit,
+          quantity: parseFloat(i.quantity) || 0,
+          unit_price: parseFloat(i.unit_price) || 0,
+          discount_pct: parseFloat(i.discount_pct) || 0,
+          total_price: i.total_price,
+          gemstone_weight: (i.gemstone_weight || 0) > 0 ? i.gemstone_weight : null,
+          variant_id: i.variant_id || null,
+        }))
+      );
+      setShowModal(false);
+      setEditChallan(null);
+      loadData();
+    }, { success: 'Delivery challan updated' });
   };
 
   const [soNumberMap, setSoNumberMap] = useState<Record<string, { so_number: string; is_b2b: boolean }>>({});
@@ -415,18 +419,14 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
     setShowViewModal(true);
   };
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     if (!deleteTarget) return;
-    try {
-      // Soft-cancel via RPC: reverses stock and rolls parent SO back to confirmed.
-      // Hard delete would lose audit trail and skip stock reversal.
+    // Soft-cancel via RPC: reverses stock and rolls parent SO back to confirmed.
+    runDelete(async () => {
       await cancelDeliveryChallan(deleteTarget.id);
       setDeleteTarget(null);
       loadData();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to cancel delivery challan';
-      alert(msg);
-    }
+    }, { success: 'Delivery challan cancelled' });
   };
 
   const openPrint = async (dc: DCType, mode: 'normal' | 'b2b' = 'normal') => {
@@ -629,8 +629,8 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
         footer={
           <>
             <button onClick={() => { setShowModal(false); setEditChallan(null); }} className="btn-secondary">Cancel</button>
-            <button onClick={editChallan ? handleEdit : handleSave} className="btn-primary">
-              {editChallan ? 'Save Changes' : 'Create Challan'}
+            <button onClick={editChallan ? handleEdit : handleSave} disabled={saving} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
+              {saving ? 'Saving…' : editChallan ? 'Save Changes' : 'Create Challan'}
             </button>
           </>
         }>
