@@ -4,6 +4,8 @@ import { supabase } from '../../lib/supabase';
 import { formatCurrency, formatDate, generateId } from '../../lib/utils';
 import Modal from '../../components/ui/Modal';
 import EmptyState from '../../components/ui/EmptyState';
+import { useAsyncAction } from '../../hooks/useAsyncAction';
+import { required, positiveNumber } from '../../lib/validate';
 import type { JournalEntry } from '../../types';
 
 const ACCOUNTS = [
@@ -21,6 +23,7 @@ export default function Journal() {
     description: '', debit_account: 'Accounts Receivable', credit_account: 'Sales Revenue',
     amount: '', notes: '',
   });
+  const { saving, run } = useAsyncAction();
 
   useEffect(() => { loadEntries(); }, []);
 
@@ -29,19 +32,25 @@ export default function Journal() {
     setEntries(data || []);
   };
 
-  const handleSave = async () => {
-    await supabase.from('journal_entries').insert({
-      journal_number: generateId('JE'),
-      journal_date: form.journal_date,
-      description: form.description,
-      debit_account: form.debit_account,
-      credit_account: form.credit_account,
-      amount: parseFloat(form.amount) || 0,
-      notes: form.notes,
-    });
-    setShowModal(false);
-    loadEntries();
-  };
+  const isFormValid = required(form.description) && positiveNumber(form.amount);
+
+  const handleSave = () => run(
+    async () => {
+      const { error } = await supabase.from('journal_entries').insert({
+        journal_number: generateId('JE'),
+        journal_date: form.journal_date,
+        description: form.description,
+        debit_account: form.debit_account,
+        credit_account: form.credit_account,
+        amount: parseFloat(form.amount),
+        notes: form.notes,
+      });
+      if (error) throw error;
+      setShowModal(false);
+      loadEntries();
+    },
+    { success: 'Journal entry saved' }
+  );
 
   const totalDebits = entries.reduce((s, e) => s + e.amount, 0);
 
@@ -106,7 +115,9 @@ export default function Journal() {
         footer={
           <>
             <button onClick={() => setShowModal(false)} className="btn-secondary">Cancel</button>
-            <button onClick={handleSave} className="btn-primary">Save Entry</button>
+            <button onClick={handleSave} disabled={saving || !isFormValid} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
+              {saving ? 'Saving…' : 'Save Entry'}
+            </button>
           </>
         }>
         <div className="space-y-3">

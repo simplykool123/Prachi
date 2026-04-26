@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { Plus, Search, CreditCard, FileText, Download, Printer, Pencil, Eye, CheckCircle, XCircle, X, Truck } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { formatCurrency, formatDate, formatDateInput, generateId, nextDocNumber, exportToCSV, useVisibilityReload, getDefaultGodownId } from '../../lib/utils';
+import { useAsyncAction } from '../../hooks/useAsyncAction';
+import { useToast } from '../../components/ui/Toast';
 import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
@@ -56,6 +58,9 @@ interface CustomerOption {
 }
 
 export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: InvoicesProps) {
+  const { saving, run: runSave } = useAsyncAction();
+  const { saving: editSaving, run: runEdit } = useAsyncAction();
+  const toast = useToast();
   const { dateRange } = useDateRange();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [search, setSearch] = useState('');
@@ -415,9 +420,9 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
   }, 0);
   const editTotal = editSubtotal + (parseFloat(editForm.courier_charges) || 0) - (parseFloat(editForm.discount_amount) || 0);
 
-  const handleSave = async () => {
+  const handleSave = () => {
     if (!form.delivery_challan_id) {
-      alert('Create Delivery Challan before Invoice');
+      toast.error('Create Delivery Challan before Invoice');
       return;
     }
 
@@ -431,7 +436,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
       }
     }
 
-    try {
+    runSave(async () => {
       const invoiceNumber = await nextDocNumber('INV', supabase);
       await createInvoice(form.delivery_challan_id, {
         invoice_number: invoiceNumber,
@@ -448,10 +453,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
       });
       setShowModal(false);
       loadData();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to create invoice.';
-      alert(`Invoice creation failed: ${msg}`);
-    }
+    }, { success: 'Invoice created', errorPrefix: 'Invoice creation failed' });
   };
 
   const openView = async (inv: Invoice) => {
@@ -508,46 +510,50 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
     setShowEditModal(true);
   };
 
-  const handleEditSave = async () => {
+  const handleEditSave = () => {
     if (!selectedInvoice) return;
 
     // Invoices no longer own stock — the Delivery Challan does.
     // Editing an invoice only updates header fields and item pricing/tax.
     // Quantity/godown changes here do NOT move stock.
-    await supabase.from('invoices').update({
-      invoice_date: editForm.invoice_date,
-      due_date: editForm.due_date || null,
-      courier_charges: parseFloat(editForm.courier_charges) || 0,
-      discount_amount: parseFloat(editForm.discount_amount) || 0,
-      subtotal: editSubtotal,
-      tax_amount: editTaxAmount,
-      total_amount: editTotal,
-      outstanding_amount: Math.max(0, editTotal - selectedInvoice.paid_amount),
-      payment_terms: editForm.payment_terms,
-      notes: editForm.notes,
-      bank_name: editForm.bank_name,
-      account_number: editForm.account_number,
-      ifsc_code: editForm.ifsc_code,
-    }).eq('id', selectedInvoice.id);
+    runEdit(async () => {
+      const { error: updateErr } = await supabase.from('invoices').update({
+        invoice_date: editForm.invoice_date,
+        due_date: editForm.due_date || null,
+        courier_charges: parseFloat(editForm.courier_charges) || 0,
+        discount_amount: parseFloat(editForm.discount_amount) || 0,
+        subtotal: editSubtotal,
+        tax_amount: editTaxAmount,
+        total_amount: editTotal,
+        outstanding_amount: Math.max(0, editTotal - selectedInvoice.paid_amount),
+        payment_terms: editForm.payment_terms,
+        notes: editForm.notes,
+        bank_name: editForm.bank_name,
+        account_number: editForm.account_number,
+        ifsc_code: editForm.ifsc_code,
+      }).eq('id', selectedInvoice.id);
+      if (updateErr) throw updateErr;
 
-    await supabase.from('invoice_items').delete().eq('invoice_id', selectedInvoice.id);
-    await supabase.from('invoice_items').insert(
-      editItems.filter(i => i.product_name).map(i => ({
-        invoice_id: selectedInvoice.id,
-        product_id: i.product_id || null,
-        product_name: i.product_name,
-        description: i.description,
-        unit: i.unit,
-        quantity: parseFloat(i.quantity) || 0,
-        unit_price: parseFloat(i.unit_price) || 0,
-        discount_pct: parseFloat(i.discount_pct) || 0,
-        tax_pct: parseFloat(i.tax_pct) || 0,
-        total_price: i.total_price,
-      }))
-    );
+      await supabase.from('invoice_items').delete().eq('invoice_id', selectedInvoice.id);
+      const { error: itemsErr } = await supabase.from('invoice_items').insert(
+        editItems.filter(i => i.product_name).map(i => ({
+          invoice_id: selectedInvoice.id,
+          product_id: i.product_id || null,
+          product_name: i.product_name,
+          description: i.description,
+          unit: i.unit,
+          quantity: parseFloat(i.quantity) || 0,
+          unit_price: parseFloat(i.unit_price) || 0,
+          discount_pct: parseFloat(i.discount_pct) || 0,
+          tax_pct: parseFloat(i.tax_pct) || 0,
+          total_price: i.total_price,
+        }))
+      );
+      if (itemsErr) throw itemsErr;
 
-    setShowEditModal(false);
-    loadData();
+      setShowEditModal(false);
+      loadData();
+    }, { success: 'Invoice updated' });
   };
 
   const openDelete = (inv: Invoice) => {
@@ -1069,7 +1075,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
         footer={
           <>
             <button onClick={() => setShowEditModal(false)} className="btn-secondary">Cancel</button>
-            <button onClick={handleEditSave} className="btn-primary">Save Changes</button>
+            <button onClick={handleEditSave} disabled={editSaving} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">{editSaving ? 'Saving…' : 'Save Changes'}</button>
           </>
         }>
         <div className="space-y-3">
@@ -1181,7 +1187,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
         footer={
           <>
             <button onClick={() => setShowModal(false)} className="btn-secondary">Cancel</button>
-            <button onClick={handleSave} className="btn-primary">Create Invoice</button>
+            <button onClick={handleSave} disabled={saving} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">{saving ? 'Creating…' : 'Create Invoice'}</button>
           </>
         }>
         <div className="space-y-3">

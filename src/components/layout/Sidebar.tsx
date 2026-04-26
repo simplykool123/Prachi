@@ -32,7 +32,7 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
   useEffect(() => {
     const loadBadges = async () => {
       const [invoiceRes, reminderRes] = await Promise.all([
-        supabase.from('invoices').select('id', { count: 'exact', head: true }).not('status', 'eq', 'cancelled'),
+        supabase.from('invoices').select('id', { count: 'exact', head: true }).neq('status', 'paid').neq('status', 'cancelled'),
         supabase.from('reminders').select('id', { count: 'exact', head: true }).eq('is_read', false),
       ]);
       setUnpaidInvoices(invoiceRes.count || 0);

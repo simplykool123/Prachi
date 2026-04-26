@@ -8,6 +8,7 @@ import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
 import { useToast } from '../../components/ui/Toast';
+import { useAsyncAction } from '../../hooks/useAsyncAction';
 import { useDateRange } from '../../contexts/DateRangeContext';
 import { createSalesOrder, createDeliveryChallan, cancelInvoice, cancelDeliveryChallan } from '../../services/documentFlowService';
 import { getSmartRate } from '../../lib/rateCardService';
@@ -519,7 +520,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
     }
     const itemsWithProduct = items.filter(i => i.product_name && i.product_id);
     if (itemsWithProduct.length === 0) {
-      alert('At least one product line is required.');
+      toast.error('At least one product line is required.');
       return;
     }
     const missingGodown = itemsWithProduct.filter(i => !i.godown_id);
@@ -532,15 +533,15 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       return;
     }
     if (missingGemPieces.length > 0) {
-      alert('Please select at least one piece weight for each gemstone line.');
+      toast.error('Please select at least one piece weight for each gemstone line.');
       return;
     }
     if (!form.customer_id) {
-      alert('Please select a customer.');
+      toast.error('Please select a customer.');
       return;
     }
     if (form.is_b2b && !form.ship_to_name.trim()) {
-      alert('Please enter a Ship To recipient name.');
+      toast.error('Please enter a Ship To recipient name.');
       return;
     }
     setIsSubmitting(true);
@@ -628,11 +629,11 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       return;
     }
     if (missingGemPieces.length > 0) {
-      alert('Please select at least one piece weight for each gemstone line.');
+      toast.error('Please select at least one piece weight for each gemstone line.');
       return;
     }
     if (form.is_b2b && !form.ship_to_name.trim()) {
-      alert('Please enter a Ship To recipient name.');
+      toast.error('Please enter a Ship To recipient name.');
       return;
     }
     setIsSubmitting(true);
@@ -860,7 +861,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       loadData();
     } catch (err) {
       console.error('Failed to delete sales order:', err);
-      alert(err instanceof Error ? err.message : 'Failed to delete sales order');
+      toast.error(err instanceof Error ? err.message : 'Failed to delete sales order');
     } finally {
       setDeleting(false);
     }
@@ -911,7 +912,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       });
       onNavigate('challans');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to convert Sales Order to Delivery Challan');
+      toast.error(err instanceof Error ? err.message : 'Failed to convert Sales Order to Delivery Challan');
     } finally {
       setConverting(null);
     }
