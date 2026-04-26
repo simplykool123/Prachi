@@ -455,6 +455,22 @@ export interface Appointment {
   travel_plan_id?: string;
   status: 'scheduled' | 'confirmed' | 'completed' | 'cancelled' | 'rescheduled';
   notes?: string;
+  google_event_id?: string;
+  created_at: string;
+}
+
+export interface Reminder {
+  id: string;
+  automation_rule_id?: string;
+  rule_name?: string;
+  trigger_event: string;
+  entity_type?: string;
+  entity_id?: string;
+  entity_name?: string;
+  message: string;
+  action_type?: string;
+  action_url?: string;
+  is_read: boolean;
   created_at: string;
 }
 
@@ -519,9 +535,10 @@ export interface AutomationRule {
   name: string;
   trigger_event: string;
   action_type: string;
-  action_config: Record<string, unknown>;
+  action_config: Record<string, string>;
   is_active: boolean;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface UserProfile {

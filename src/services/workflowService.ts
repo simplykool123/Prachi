@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { updateLastRate } from '../lib/rateCardService';
 import { processStockMovement } from './stockService';
+import { fireAutomation } from './automationService';
 
 export async function onInvoiceCreated(invoiceId: string): Promise<{ errors: string[] }> {
   const errors: string[] = [];
@@ -68,6 +69,17 @@ export async function onInvoiceCreated(invoiceId: string): Promise<{ errors: str
       .eq('id', invoice.sales_order_id);
   }
 
+  // Fire automation rules for invoice_created
+  await fireAutomation('invoice_created', {
+    entity_type: 'invoice',
+    entity_id: invoice.id,
+    entity_name: invoice.invoice_number,
+    customer_name: invoice.customer_name ?? '',
+    customer_phone: invoice.customer_phone ?? '',
+    invoice_number: invoice.invoice_number,
+    amount: invoice.total_amount,
+  });
+
   return { errors };
 }
 
@@ -119,4 +131,15 @@ export async function onPaymentCreated(paymentId: string): Promise<void> {
       .update({ status: 'closed', updated_at: new Date().toISOString() })
       .eq('id', invoice.sales_order_id);
   }
+
+  // Fire automation rules for payment_received
+  await fireAutomation('payment_received', {
+    entity_type: 'payment',
+    entity_id: paymentId,
+    entity_name: `Payment for invoice`,
+    customer_name: invoice.customer_name ?? '',
+    customer_phone: payment.party_name ?? '',
+    amount: payment.amount,
+    invoice_number: '',
+  });
 }
