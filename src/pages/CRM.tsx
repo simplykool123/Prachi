@@ -18,6 +18,7 @@ import { createSalesOrder } from '../services/documentFlowService';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useToast } from '../components/ui/Toast';
 import { required } from '../lib/validate';
+import { getCustomerFileDeletePath } from '../lib/storagePath';
 import type {
   Customer, CrmNote, CrmFile, Appointment, TravelPlan, Invoice,
   SalesOrder, Payment, ProductRecommendation, Product, VastuPlan
@@ -1058,7 +1059,7 @@ export default function CRM() {
                                 className="w-7 h-7 bg-white rounded-full flex items-center justify-center hover:bg-neutral-100">
                                 <Download className="w-3.5 h-3.5 text-neutral-700" />
                               </a>
-                              <button onClick={e => { e.stopPropagation(); setConfirmDeleteDoc({ id: doc.id, file_path: doc.file_url }); }}
+                              <button onClick={e => { e.stopPropagation(); setConfirmDeleteDoc({ id: doc.id, file_path: getCustomerFileDeletePath((doc as any).file_path, doc.file_url) || undefined }); }}
                                 className="w-7 h-7 bg-white rounded-full flex items-center justify-center hover:bg-error-50">
                                 <Hash className="w-3.5 h-3.5 text-error-600" />
                               </button>
