@@ -1,4 +1,4 @@
-# Prachiful App — Bug Fixes
+# Prachi App — Bug Fixes
 
 ## How to Apply
 
@@ -38,7 +38,7 @@ Copy each fixed file from this folder into your project at the same path.
 | 12 | **lib/stockService.ts** | `await supabase.rpc !== undefined && await supabase.from(...)` — nonsensical, always `true`, broken async | Replaced with clean async/await |
 | 13 | **types/index.ts** | `CustomerLastRate` interface defined twice with different shapes — TypeScript conflict | Merged into one interface, added `CustomerProductLastRate` alias |
 | 14 | **contexts/AuthContext.tsx** | `accountant` role had no `canAccessSales` or `canAccessInventory` — accountants saw a blank app | Accountants now get read access to sales + inventory |
-| 15 | **pages/Dispatch.tsx** | Dispatch number used random `generateId()` instead of sequential `DSP-YYYYMM-NNN` format | Fixed to sequential format |
+| 15 | **pages/Courier.tsx** | Courier/dispatch numbering alignment required cleanup to keep generated references consistent | Fixed generated references to follow the expected format |
 | 16 | **components/layout/Sidebar.tsx** | "Shipments" badge counted `courier_entries` (wrong table), Dispatch page had no nav link at all | Badge now counts `dispatch_entries`, added "Dispatch" nav item |
 
 ---
