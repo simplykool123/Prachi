@@ -1,3 +1,28 @@
+/**
+ * Format any thrown value into a human-readable string.
+ *
+ * Supabase / PostgREST errors are plain objects with `.message`, `.details`,
+ * `.hint`, and `.code` — they are NOT `Error` instances, so a naive
+ * `String(err)` produces "[object Object]" and hides the real failure cause.
+ * This helper unwraps those cases.
+ */
+export const formatError = (err: unknown): string => {
+  if (err == null) return 'Unknown error';
+  if (typeof err === 'string') return err;
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'object') {
+    const e = err as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+    const parts: string[] = [];
+    if (typeof e.message === 'string' && e.message) parts.push(e.message);
+    if (typeof e.details === 'string' && e.details) parts.push(e.details);
+    if (typeof e.hint === 'string' && e.hint) parts.push(`(hint: ${e.hint})`);
+    if (typeof e.code === 'string' && e.code) parts.push(`[${e.code}]`);
+    if (parts.length > 0) return parts.join(' ');
+    try { return JSON.stringify(err); } catch { /* fall through */ }
+  }
+  return String(err);
+};
+
 export const formatCurrency = (amount: number): string => {
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',

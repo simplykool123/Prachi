@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { Building2, Warehouse, Layers, Users } from 'lucide-react';
+import { Building2, Warehouse, Layers, Users, Globe, Truck } from 'lucide-react';
 import CompanySettingsTab from './settings/CompanySettingsTab';
 import CompaniesTab from './settings/CompaniesTab';
 import GodownsTab from './settings/GodownsTab';
 import UsersTab from './settings/UsersTab';
+import WebsiteSettingsTab from './settings/WebsiteSettingsTab';
+import ShippingSettingsTab from './settings/ShippingSettingsTab';
 
-type SettingsTab = 'companies' | 'company' | 'godowns' | 'users';
+type SettingsTab = 'companies' | 'company' | 'godowns' | 'users' | 'website' | 'shipping';
 
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('companies');
@@ -15,6 +17,8 @@ export default function Settings() {
     { id: 'users',     label: 'Users',            icon: Users },
     { id: 'company',   label: 'Default Settings', icon: Building2 },
     { id: 'godowns',   label: 'Godowns',          icon: Warehouse },
+    { id: 'website',   label: 'Website',          icon: Globe },
+    { id: 'shipping',  label: 'Shipping',         icon: Truck },
   ];
 
   return (
@@ -45,6 +49,8 @@ export default function Settings() {
         {activeTab === 'users'     && <UsersTab />}
         {activeTab === 'company'   && <CompanySettingsTab />}
         {activeTab === 'godowns'   && <GodownsTab />}
+        {activeTab === 'website'   && <WebsiteSettingsTab />}
+        {activeTab === 'shipping'  && <ShippingSettingsTab />}
       </div>
     </div>
   );

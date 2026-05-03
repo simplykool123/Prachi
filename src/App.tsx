@@ -10,6 +10,9 @@ import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
 import GodownStock from './pages/inventory/GodownStock';
 import GodownTransfer from './pages/inventory/GodownTransfer';
+import Bundles from './pages/inventory/Bundles';
+import BulkWeightEditor from './pages/inventory/BulkWeightEditor';
+import ShippingRates from './pages/ShippingRates';
 import Purchase from './pages/Purchase';
 import SalesOrders from './pages/sales/SalesOrders';
 import Invoices from './pages/sales/Invoices';
@@ -24,6 +27,7 @@ import Courier from './pages/Courier';
 import Reports from './pages/Reports';
 import Automation from './pages/Automation';
 import Settings from './pages/Settings';
+import InquiryLeads from './pages/InquiryLeads';
 // Deprecated - replaced by B2B Sales Order flow
 // import DropShipments from './pages/sales/DropShipments';
 import type { ActivePage, DeliveryChallan as DCType } from './types';
@@ -53,6 +57,10 @@ const PAGE_TITLES: Partial<Record<ActivePage, string>> = {
   reports: 'Reports',
   automation: 'Automation',
   settings: 'Settings',
+  'inquiry-leads': 'Inquiry Leads',
+  bundles: 'Bundles & Combos',
+  'bulk-weight': 'Bulk Weight Editor',
+  'shipping-rates': 'Shipping Rates',
 };
 
 function AppShell() {
@@ -81,6 +89,9 @@ function AppShell() {
       case 'inventory': return canAccessInventory ? <Inventory /> : <Dashboard onNavigate={navigate} />;
       case 'godown-stock': return canAccessInventory ? <GodownStock /> : <Dashboard onNavigate={navigate} />;
       case 'godown-transfer': return canAccessInventory ? <GodownTransfer /> : <Dashboard onNavigate={navigate} />;
+      case 'bundles': return canAccessInventory ? <Bundles /> : <Dashboard onNavigate={navigate} />;
+      case 'bulk-weight': return canAccessInventory ? <BulkWeightEditor /> : <Dashboard onNavigate={navigate} />;
+      case 'shipping-rates': return isAdmin ? <ShippingRates /> : <Dashboard onNavigate={navigate} />;
       case 'purchase': return isAdmin ? <Purchase /> : <Dashboard onNavigate={navigate} />;
       case 'finance':
       case 'ledger': return canAccessFinance ? <Ledger /> : <Dashboard onNavigate={navigate} />;
@@ -90,6 +101,7 @@ function AppShell() {
       case 'reports': return <Reports />;
       case 'automation': return isAdmin ? <Automation /> : <Dashboard onNavigate={navigate} />;
       case 'settings': return isAdmin ? <Settings /> : <Dashboard onNavigate={navigate} />;
+      case 'inquiry-leads': return <InquiryLeads />;
       // Deprecated - replaced by B2B Sales Order flow
       case 'drop-shipments': return <Dashboard onNavigate={navigate} />;
       default: return <Dashboard onNavigate={navigate} />;

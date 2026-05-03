@@ -98,3 +98,25 @@ export const uploadProductImage = async (file: File, productId: string): Promise
   const { data } = supabase.storage.from('product-images').getPublicUrl(path);
   return data.publicUrl;
 };
+
+export const uploadProductGalleryImage = async (file: File, productId?: string, folder: string = 'gallery'): Promise<string | null> => {
+  if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+    console.error('Invalid file type. Only JPEG, PNG, and WebP are allowed.');
+    return null;
+  }
+  if (file.size > MAX_IMAGE_SIZE) {
+    console.error('File too large. Maximum size is 5MB.');
+    return null;
+  }
+  const ext = file.type.split('/')[1] || 'jpg';
+  const random = Math.random().toString(36).slice(2, 8);
+  const safeFolder = folder.replace(/[^a-z0-9_-]/gi, '') || 'gallery';
+  const path = `${safeFolder}/${productId || 'tmp'}_${Date.now()}_${random}.${ext}`;
+  const { error } = await supabase.storage.from('product-images').upload(path, file, { upsert: false });
+  if (error) {
+    console.error('Gallery upload error:', error);
+    return null;
+  }
+  const { data } = supabase.storage.from('product-images').getPublicUrl(path);
+  return data.publicUrl;
+};

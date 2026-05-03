@@ -10,6 +10,7 @@ interface DateRangeContextType {
   setDateRange: (range: DateRange) => void;
   resetToThisMonth: () => void;
   resetToThisYear: () => void;
+  resetToYearToDate: () => void;
   label: string;
 }
 
@@ -21,14 +22,26 @@ const getThisMonthRange = (): DateRange => {
   };
 };
 
+// Year-to-date — Jan 1 of the current calendar year through today.
+// Used as the system-wide default so reports / lists open with the
+// full year's data already in view.
+const getYearToDateRange = (): DateRange => {
+  const now = new Date();
+  return {
+    from: `${now.getFullYear()}-01-01`,
+    to: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
+  };
+};
+
 const DateRangeContext = createContext<DateRangeContextType | null>(null);
 
 export function DateRangeProvider({ children }: { children: React.ReactNode }) {
-  const [dateRange, setDateRangeState] = useState<DateRange>(getThisMonthRange());
+  const [dateRange, setDateRangeState] = useState<DateRange>(getYearToDateRange());
 
   const setDateRange = (range: DateRange) => setDateRangeState(range);
 
   const resetToThisMonth = () => setDateRangeState(getThisMonthRange());
+  const resetToYearToDate = () => setDateRangeState(getYearToDateRange());
 
   const resetToThisYear = () => {
     const now = new Date();
@@ -47,7 +60,7 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <DateRangeContext.Provider value={{ dateRange, setDateRange, resetToThisMonth, resetToThisYear, label: formatLabel() }}>
+    <DateRangeContext.Provider value={{ dateRange, setDateRange, resetToThisMonth, resetToThisYear, resetToYearToDate, label: formatLabel() }}>
       {children}
     </DateRangeContext.Provider>
   );

@@ -7,7 +7,13 @@ export interface Product {
   sku?: string;
   name: string;
   product_type?: ProductType;
-  category?: 'Astro Products' | 'Vastu Items' | 'Healing Items';
+  // Treated as the Main category. Widened from the legacy 3-value union
+  // to plain string so the new taxonomy in src/lib/productCategories.ts
+  // (Crystals, Pyramids, Feng Shui, Vastu & Yantras, Handicraft, Dowsing)
+  // is accepted without breaking any legacy "Astro Products" / "Vastu Items"
+  // / "Healing Items" rows already in the database.
+  category?: string;
+  sub_category?: string | null;
   unit: string;
   purchase_price?: number;
   selling_price?: number;
@@ -21,10 +27,56 @@ export interface Product {
   remaining_weight?: number;
   weight_unit?: 'grams' | 'carats' | 'kg';
   is_active?: boolean;
+  show_on_website?: boolean;
+  short_description?: string;
+  specs?: Record<string, unknown> | null;
+  tags?: string[];
   created_at?: string;
   updated_at?: string;
 }
 
+export interface ProductWebMeta {
+  id?: string;
+  product_id: string;
+  slug?: string;
+  tagline?: string;
+  vastu_direction?: string[];
+  vastu_benefit?: string[];
+  placement_note?: string;
+  where_to_use?: string;
+  expected_results?: string;
+  is_published?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ProductImage {
+  id: string;
+  product_id: string;
+  url: string;
+  alt_text?: string;
+  sort_order: number;
+  is_primary: boolean;
+  created_at?: string;
+}
+
+export interface InquiryLead {
+  id: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  product_id?: string | null;
+  product_name?: string;
+  message?: string;
+  status: 'new' | 'read' | 'replied' | 'closed';
+  source?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+// (added in 20260503000001) Optional per-variant shipping weight override.
+// Falls back to the parent product's `weight_grams` when null.
+export interface ProductVariantWeight { weight_grams?: number | null }
 export interface ProductVariant {
   id: string;
   product_id: string;
@@ -222,6 +274,7 @@ export interface Customer {
   customer_score?: number;
   last_interaction_date?: string;
   is_active?: boolean;
+  signup_source?: string | null;
   created_at?: string;
 }
 
@@ -258,6 +311,13 @@ export interface SalesOrder {
   courier_charges: number;
   discount_amount: number;
   total_amount: number;
+  // Shipping (added in migration 20260503000001) — parcel weight stamped
+  // at checkout (or set later by warehouse staff). Heavy orders that
+  // exceed `heavy_item_threshold_grams` are routed into a manual
+  // "request a shipping quote" flow instead of taking payment.
+  shipping_weight_grams?: number | null;
+  requires_shipping_quote?: boolean;
+  shipping_quote_status?: 'pending' | 'quoted' | 'accepted' | 'declined' | null;
   notes?: string;
   is_b2b?: boolean;
   ship_to_customer_id?: string | null;
@@ -288,6 +348,7 @@ export interface SalesOrderItem {
   product_unit_ids?: string[];
   variant_id?: string;
   gemstone_weight?: number;
+  bundle_id?: string | null;
 }
 
 export interface Invoice {
@@ -738,4 +799,39 @@ export type ActivePage =
   | 'courier'
   | 'automation'
   | 'settings'
+  | 'inquiry-leads'
+  | 'bundles'
+  | 'bulk-weight'
+  | 'shipping-rates'
   | 'drop-shipments';
+
+export interface ProductBundle {
+  id: string;
+  name: string;
+  slug?: string | null;
+  description?: string | null;
+  long_description?: string | null;
+  image_url?: string | null;
+  bundle_price: number;
+  compare_at_price?: number | null;
+  valid_from?: string | null;
+  valid_to?: string | null;
+  is_active: boolean;
+  show_on_website: boolean;
+  sort_order: number;
+  created_at?: string;
+  updated_at?: string;
+  items?: ProductBundleItem[];
+}
+
+export interface ProductBundleItem {
+  id: string;
+  bundle_id: string;
+  product_id: string;
+  quantity: number;
+  sort_order: number;
+  created_at?: string;
+  product?: { id: string; name: string; selling_price?: number; unit?: string; image_url?: string | null };
+}
+
+export type BundleWithItems = ProductBundle & { items: ProductBundleItem[] };

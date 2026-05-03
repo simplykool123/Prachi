@@ -1,5 +1,7 @@
+import React, { useEffect, useState } from 'react';
 import { formatCurrency, formatDate, numberToWords } from '../../lib/utils';
 import { useCompanySettings } from '../../lib/useCompanySettings';
+import { supabase } from '../../lib/supabase';
 import type { SalesOrder, SalesOrderItem } from '../../types';
 import type { Company } from '../../lib/companiesService';
 
@@ -15,6 +17,29 @@ interface SalesOrderPrintProps {
 export default function SalesOrderPrint({ order, items, companyOverride, printMode = 'normal' }: SalesOrderPrintProps) {
   const { company: defaultCompany } = useCompanySettings();
   const isB2B = printMode === 'b2b';
+
+  const [bundleNameMap, setBundleNameMap] = useState<Record<string, string>>({});
+  useEffect(() => {
+    // Defensive: bundle_id may not exist on items, and product_bundles may
+    // not exist in the DB if migration 0006 hasn't been applied. Treat any
+    // failure as "no bundle names available" — print view must still render.
+    const ids: string[] = [];
+    for (const it of items) {
+      if (it.bundle_id && !ids.includes(it.bundle_id)) ids.push(it.bundle_id);
+    }
+    if (ids.length === 0) { setBundleNameMap({}); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase.from('product_bundles').select('id, name').in('id', ids);
+        if (cancelled || error || !data) return;
+        const map: Record<string, string> = {};
+        for (const b of data as Array<{ id: string; name: string }>) map[b.id] = b.name;
+        setBundleNameMap(map);
+      } catch { /* product_bundles missing — keep empty map */ }
+    })();
+    return () => { cancelled = true; };
+  }, [items]);
 
   const co = companyOverride ? {
     name: companyOverride.name, tagline: companyOverride.tagline || '',
@@ -122,28 +147,53 @@ export default function SalesOrderPrint({ order, items, companyOverride, printMo
             </tr>
           </thead>
           <tbody>
-            {b2bItems.map((item, idx) => {
-              const gemW = (item as Record<string, any>).gemstone_weight as number | undefined;
-              const isGemLine = gemW != null && gemW > 0;
-              const wUnit = (item as Record<string, any>).weight_unit === 'carats' ? 'ct' : 'g';
-              return (
-                <tr key={item.id || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-neutral-50'}>
-                  <td className="px-3 py-2.5 text-xs text-neutral-500 border-b border-neutral-100">{idx + 1}</td>
-                  <td className="px-3 py-2.5 border-b border-neutral-100">
-                    <p className="text-sm font-medium text-neutral-900">{item.product_name}</p>
-                    {isGemLine && (
-                      <p className="text-[10px] text-neutral-400 mt-0.5">{gemW} {wUnit} &times; {formatCurrency(item.unit_price)} = {formatCurrency(item.total_price)}</p>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5 text-xs text-center text-neutral-600 border-b border-neutral-100">{item.unit}</td>
-                  <td className="px-3 py-2.5 text-xs text-right text-neutral-700 border-b border-neutral-100">
-                    {isGemLine ? `${gemW} ${wUnit}` : item.quantity}
-                  </td>
-                  <td className="px-3 py-2.5 text-xs text-right text-neutral-700 border-b border-neutral-100">{formatCurrency(item.unit_price)}{isGemLine && <span className="text-neutral-400">/{wUnit}</span>}</td>
-                  <td className="px-3 py-2.5 text-sm text-right font-medium text-neutral-900 border-b border-neutral-100">{formatCurrency(item.total_price)}</td>
-                </tr>
-              );
-            })}
+            {(() => {
+              const sorted = [...b2bItems].sort((a, b) => {
+                const ab = a.bundle_id || '';
+                const bb = b.bundle_id || '';
+                if (ab === bb) return 0;
+                if (!ab) return 1;
+                if (!bb) return -1;
+                return ab < bb ? -1 : 1;
+              });
+              const bundleNames: Record<string, string> = { ...bundleNameMap };
+              const out: React.ReactNode[] = [];
+              let lastBundleId: string | null = null;
+              sorted.forEach((item, idx) => {
+                const bId = item.bundle_id || null;
+                if (bId && bId !== lastBundleId) {
+                  out.push(
+                    <tr key={`bundle-${bId}-${idx}`} className="bg-primary-50">
+                      <td colSpan={6} className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-primary-700 border-b border-primary-100">
+                        Bundle: {bundleNames[bId] || 'Combo Offer'}
+                      </td>
+                    </tr>
+                  );
+                }
+                lastBundleId = bId;
+                const gemW = item.gemstone_weight;
+                const isGemLine = gemW != null && gemW > 0;
+                const wUnit = item.weight_unit === 'carats' ? 'ct' : 'g';
+                out.push(
+                  <tr key={item.id || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-neutral-50'}>
+                    <td className="px-3 py-2.5 text-xs text-neutral-500 border-b border-neutral-100">{idx + 1}</td>
+                    <td className={`px-3 py-2.5 border-b border-neutral-100 ${bId ? 'pl-6' : ''}`}>
+                      <p className="text-sm font-medium text-neutral-900">{item.product_name}</p>
+                      {isGemLine && (
+                        <p className="text-[10px] text-neutral-400 mt-0.5">{gemW} {wUnit} &times; {formatCurrency(item.unit_price)} = {formatCurrency(item.total_price)}</p>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-xs text-center text-neutral-600 border-b border-neutral-100">{item.unit}</td>
+                    <td className="px-3 py-2.5 text-xs text-right text-neutral-700 border-b border-neutral-100">
+                      {isGemLine ? `${gemW} ${wUnit}` : item.quantity}
+                    </td>
+                    <td className="px-3 py-2.5 text-xs text-right text-neutral-700 border-b border-neutral-100">{formatCurrency(item.unit_price)}{isGemLine && <span className="text-neutral-400">/{wUnit}</span>}</td>
+                    <td className="px-3 py-2.5 text-sm text-right font-medium text-neutral-900 border-b border-neutral-100">{formatCurrency(item.total_price)}</td>
+                  </tr>
+                );
+              });
+              return out;
+            })()}
           </tbody>
         </table>
       </div>
@@ -151,7 +201,27 @@ export default function SalesOrderPrint({ order, items, companyOverride, printMo
       <div className="flex justify-end mb-5">
         <div className="w-60 space-y-1">
           <div className="flex justify-between text-sm text-neutral-600"><span>Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
-          {(order.courier_charges || 0) > 0 && <div className="flex justify-between text-sm text-neutral-600"><span>Courier</span><span>{formatCurrency(order.courier_charges || 0)}</span></div>}
+          {(order.courier_charges || 0) > 0 && (
+            <div className="flex justify-between text-sm text-neutral-600">
+              <span>
+                Courier
+                {order.shipping_weight_grams ? (
+                  <span className="text-neutral-400 text-[10px] ml-1">
+                    ({(order.shipping_weight_grams / 1000).toFixed(2)} kg)
+                  </span>
+                ) : null}
+              </span>
+              <span>{formatCurrency(order.courier_charges || 0)}</span>
+            </div>
+          )}
+          {order.requires_shipping_quote && (
+            <div className="flex justify-between text-[11px] text-warning-700 bg-warning-50 border border-warning-200 rounded px-2 py-1">
+              <span>Heavy order — shipping quote</span>
+              <span className="font-semibold uppercase tracking-wider">
+                {order.shipping_quote_status || 'pending'}
+              </span>
+            </div>
+          )}
           {(order.discount_amount || 0) > 0 && <div className="flex justify-between text-sm text-success-600"><span>Discount</span><span>−{formatCurrency(order.discount_amount || 0)}</span></div>}
           <div className="flex justify-between text-base font-bold bg-primary-600 text-white px-3 py-2 rounded-lg mt-1"><span>Total</span><span>{formatCurrency(total)}</span></div>
         </div>

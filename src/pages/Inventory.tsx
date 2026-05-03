@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, ArrowUpDown, Search, BarChart2, AlertTriangle, ImagePlus, Download, History, Pencil, Trash2, Eye, X, MoreVertical, Layers, ChevronDown, ChevronRight } from 'lucide-react';
-import { supabase, uploadProductImage, getSessionWithRetry, runQueryWithGlobalRecovery } from '../lib/supabase';
-import { formatCurrency, generateId, exportToCSV, formatDate, useVisibilityReload } from '../lib/utils';
+import { Plus, ArrowUpDown, Search, BarChart2, AlertTriangle, ImagePlus, Download, History, Pencil, Trash2, Eye, X, MoreVertical, Layers, ChevronDown, ChevronRight, Globe, Star, ArrowUp, ArrowDown, Upload } from 'lucide-react';
+import { supabase, uploadProductImage, uploadProductGalleryImage, getSessionWithRetry, runQueryWithGlobalRecovery } from '../lib/supabase';
+import { formatCurrency, generateId, exportToCSV, formatDate, useVisibilityReload, formatError } from '../lib/utils';
+import { MAIN_CATEGORIES, getSubCategories, isKnownMainCategory } from '../lib/productCategories';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/ui/Modal';
 import EmptyState from '../components/ui/EmptyState';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import type { Product, ProductUnit, ProductVariant, ProductType, StockMovement, Godown } from '../types';
+import type { Product, ProductUnit, ProductVariant, ProductType, StockMovement, Godown, ProductImage, ProductWebMeta } from '../types';
 import { fetchCompanies } from '../lib/companiesService';
 import type { Company } from '../lib/companiesService';
 import { processStockMovement, addGemPieces, removeGemPieces, updateGemPieceMetadata, markGemPiecesSold, setVariantGodownStock } from '../services/stockService';
@@ -59,7 +60,28 @@ export default function Inventory() {
     total_weight: '', weight_unit: 'grams' as 'grams' | 'carats' | 'kg',
     low_stock_enabled: true,
     company_id: '',
+    show_on_website: true,
+    sub_category: '' as string,
   });
+  type WebMetaForm = {
+    slug: string; tagline: string;
+    vastu_direction: string[]; vastu_benefit: string[];
+    placement_note: string; where_to_use: string; expected_results: string;
+    is_published: boolean;
+  };
+  const EMPTY_WEB_META: WebMetaForm = {
+    slug: '', tagline: '',
+    vastu_direction: [], vastu_benefit: [],
+    placement_note: '', where_to_use: '', expected_results: '',
+    is_published: false,
+  };
+  const [webMeta, setWebMeta] = useState<WebMetaForm>(EMPTY_WEB_META);
+  const [webMetaOpen, setWebMetaOpen] = useState(false);
+  const [autoSlug, setAutoSlug] = useState(true);
+  type GalleryItem = { id: string; url: string; alt_text: string; is_primary: boolean; isNew: boolean };
+  const [galleryImages, setGalleryImages] = useState<GalleryItem[]>([]);
+  const [galleryUploading, setGalleryUploading] = useState(false);
+  const galleryFileRef = useRef<HTMLInputElement>(null);
   const [stockForm, setStockForm] = useState({ type: 'adjustment', quantity: '', notes: '', movement_label: 'adjustment', godown_id: '', piece_weights: '' });
   const [selectedPieceIds, setSelectedPieceIds] = useState<Set<string>>(new Set());
   const [pieceEdits, setPieceEdits] = useState<Record<string, string>>({});
@@ -175,6 +197,9 @@ export default function Inventory() {
     setFiltered(data);
   }, [products, category, stockStatus, search]);
 
+  const slugify = (s: string) =>
+    s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
   const openAdd = () => {
     setEditing(null);
     setPendingImageFile(null);
@@ -185,8 +210,12 @@ export default function Inventory() {
     const defaultCompany = companies.find(c => c.sort_order === 2) || companies[0];
     setEditingVariants([]);
     setEditingPieces([]);
+    setWebMeta(EMPTY_WEB_META);
+    setWebMetaOpen(false);
+    setAutoSlug(true);
+    setGalleryImages([]);
     setForm({
-      name: '', category: 'Astro Products', unit: 'pcs',
+      name: '', category: MAIN_CATEGORIES[0], unit: 'pcs',
       product_type: 'simple',
       purchase_price: '', selling_price: '', low_stock_alert: '5',
       description: '', sku: generateId('SKU'), image_url: '',
@@ -194,6 +223,8 @@ export default function Inventory() {
       total_weight: '', weight_unit: 'grams',
       low_stock_enabled: true,
       company_id: defaultCompany?.id || '',
+      show_on_website: true,
+      sub_category: '',
     });
     setShowModal(true);
   };
@@ -205,11 +236,43 @@ export default function Inventory() {
     setPendingImageFile(null);
     setImagePreview(p.image_url || '');
     setOpeningStocks({});
-    const { data: stocks } = await supabase.from('godown_stock').select('godown_id, quantity').eq('product_id', p.id);
+    setAutoSlug(false);
+    const [stocksRes, metaRes, imagesRes] = await Promise.all([
+      supabase.from('godown_stock').select('godown_id, quantity').eq('product_id', p.id),
+      supabase.from('product_web_meta').select('*').eq('product_id', p.id).maybeSingle(),
+      supabase.from('product_images').select('*').eq('product_id', p.id).order('sort_order', { ascending: true }),
+    ]);
     const stocksMap: Record<string, any> = {};
-    (stocks || []).forEach(s => { stocksMap[s.godown_id] = String(s.quantity); });
+    (stocksRes.data || []).forEach(s => { stocksMap[s.godown_id] = String(s.quantity); });
     godowns.forEach(g => { if (!stocksMap[g.id]) stocksMap[g.id] = '0'; });
     setEditGodownStocks(stocksMap);
+
+    const meta = metaRes.data as ProductWebMeta | null;
+    if (meta) {
+      setWebMeta({
+        slug: meta.slug || '',
+        tagline: meta.tagline || '',
+        vastu_direction: meta.vastu_direction || [],
+        vastu_benefit: meta.vastu_benefit || [],
+        placement_note: meta.placement_note || '',
+        where_to_use: meta.where_to_use || '',
+        expected_results: meta.expected_results || '',
+        is_published: !!meta.is_published,
+      });
+      setWebMetaOpen(true);
+    } else {
+      setWebMeta({ ...EMPTY_WEB_META, slug: slugify(p.name) });
+      setWebMetaOpen(false);
+    }
+
+    const imgs = (imagesRes.data || []) as ProductImage[];
+    setGalleryImages(imgs.map(img => ({
+      id: img.id,
+      url: img.url,
+      alt_text: img.alt_text || '',
+      is_primary: !!img.is_primary,
+      isNew: false,
+    })));
     const pType: ProductType = (p.product_type as ProductType) || 'simple';
     if (pType === 'gemstone') {
       const { data: uRows } = await supabase.from('product_units').select('id, weight, godown_id').eq('product_id', p.id).eq('status', 'in_stock').order('created_at');
@@ -233,7 +296,7 @@ export default function Inventory() {
       setEditingVariants([]);
     }
     setForm({
-      name: p.name, category: p.category, unit: p.unit,
+      name: p.name, category: p.category || MAIN_CATEGORIES[0], unit: p.unit,
       product_type: pType,
       purchase_price: String(p.purchase_price), selling_price: String(p.selling_price),
       low_stock_alert: String(p.low_stock_alert),
@@ -244,6 +307,8 @@ export default function Inventory() {
       weight_unit: (p.weight_unit as 'grams' | 'carats' | 'kg') || 'grams',
       low_stock_enabled: p.low_stock_alert > 0,
       company_id: p.company_id || '',
+      show_on_website: p.show_on_website !== false,
+      sub_category: p.sub_category || '',
     });
     setShowModal(true);
   };
@@ -253,6 +318,76 @@ export default function Inventory() {
     if (!file) return;
     setPendingImageFile(file);
     setImagePreview(URL.createObjectURL(file));
+  };
+
+  const handleGalleryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setGalleryUploading(true);
+    try {
+      const uploaded: GalleryItem[] = [];
+      for (const file of files) {
+        const url = await uploadProductGalleryImage(file, editing?.id);
+        if (url) {
+          uploaded.push({
+            id: `new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            url,
+            alt_text: '',
+            is_primary: false,
+            isNew: true,
+          });
+        }
+      }
+      setGalleryImages(prev => {
+        const combined = [...prev, ...uploaded];
+        if (combined.length > 0 && !combined.some(g => g.is_primary)) {
+          combined[0].is_primary = true;
+        }
+        return combined;
+      });
+      if (uploaded.length < files.length) {
+        toast.error(`${files.length - uploaded.length} image(s) failed to upload`);
+      }
+    } catch (err: unknown) {
+      toast.error(`Upload failed: ${formatError(err)}`);
+      console.error('[Inventory] upload failed:', err);
+    } finally {
+      setGalleryUploading(false);
+      if (galleryFileRef.current) galleryFileRef.current.value = '';
+    }
+  };
+
+  const moveGalleryItem = (idx: number, dir: -1 | 1) => {
+    setGalleryImages(prev => {
+      const next = [...prev];
+      const target = idx + dir;
+      if (target < 0 || target >= next.length) return prev;
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next;
+    });
+  };
+
+  const setPrimaryGalleryItem = (idx: number) => {
+    setGalleryImages(prev => prev.map((g, i) => ({ ...g, is_primary: i === idx })));
+  };
+
+  const removeGalleryItem = (idx: number) => {
+    setGalleryImages(prev => {
+      const next = prev.filter((_, i) => i !== idx);
+      if (next.length > 0 && !next.some(g => g.is_primary)) {
+        next[0].is_primary = true;
+      }
+      return next;
+    });
+  };
+
+  const addChip = (field: 'vastu_direction' | 'vastu_benefit', value: string) => {
+    const v = value.trim();
+    if (!v) return;
+    setWebMeta(m => ({ ...m, [field]: m[field].includes(v) ? m[field] : [...m[field], v] }));
+  };
+  const removeChip = (field: 'vastu_direction' | 'vastu_benefit', idx: number) => {
+    setWebMeta(m => ({ ...m, [field]: m[field].filter((_, i) => i !== idx) }));
   };
 
   const handleSave = async () => {
@@ -268,6 +403,7 @@ export default function Inventory() {
     const totalW = isGemstone && form.total_weight ? parseFloat(form.total_weight) || 0 : 0;
     const basePayload = {
       name: form.name, category: form.category,
+      sub_category: form.sub_category ? form.sub_category : null,
       unit: (form.product_type === 'simple' || form.product_type === 'variant') ? 'pcs' : form.unit,
       sku: form.sku,
       product_type: form.product_type,
@@ -277,16 +413,97 @@ export default function Inventory() {
       description: form.description,
       image_url: imageUrl || null,
       direction: form.direction || null,
-      weight_grams: isGemstone && form.weight_grams ? parseFloat(form.weight_grams) || null : null,
+      // weight_grams now serves a dual purpose:
+      //   • for gemstone — average per-piece weight (legacy use)
+      //   • for every other product type — shipping weight in grams,
+      //     used by the website cart's slab-based courier calculator.
+      // Save whatever the user typed; null only when the field is blank.
+      weight_grams: form.weight_grams ? (parseFloat(form.weight_grams) || null) : null,
       total_weight: totalW,
       weight_unit: (isGemstone || form.product_type === 'weight') ? form.weight_unit : null,
       company_id: form.company_id || null,
+      show_on_website: form.show_on_website,
       updated_at: new Date().toISOString(),
+    };
+
+    const persistWebData = async (productId: string) => {
+      const hasMeta =
+        webMeta.slug || webMeta.tagline ||
+        webMeta.vastu_direction.length > 0 || webMeta.vastu_benefit.length > 0 ||
+        webMeta.placement_note || webMeta.where_to_use || webMeta.expected_results ||
+        webMeta.is_published;
+      // Always upsert when editing an existing product (so clearing fields persists),
+      // or when adding a new product and the user actually filled in any web meta.
+      if (editing || hasMeta) {
+        const metaPayload = {
+          product_id: productId,
+          slug: webMeta.slug ? webMeta.slug.trim() : null,
+          tagline: webMeta.tagline || null,
+          vastu_direction: webMeta.vastu_direction,
+          vastu_benefit: webMeta.vastu_benefit,
+          placement_note: webMeta.placement_note || null,
+          where_to_use: webMeta.where_to_use || null,
+          expected_results: webMeta.expected_results || null,
+          // Keep is_published in lockstep with show_on_website so the single
+          // "Show on website" toggle controls both the products RLS gate and
+          // the product_web_meta RLS gate the website reads.
+          is_published: form.show_on_website,
+          updated_at: new Date().toISOString(),
+        };
+        // Pre-existing databases may have been created before the UNIQUE
+        // constraint on product_id existed (CREATE TABLE IF NOT EXISTS is a
+        // no-op for already-present tables), which makes onConflict='product_id'
+        // fail with 42P10. Do a manual select → update/insert instead so this
+        // works regardless of whether the constraint is present.
+        const { data: existingMeta, error: metaSelErr } = await supabase
+          .from('product_web_meta')
+          .select('id')
+          .eq('product_id', productId)
+          .maybeSingle();
+        if (metaSelErr) throw metaSelErr;
+        if (existingMeta) {
+          const { error: metaUpdErr } = await supabase
+            .from('product_web_meta')
+            .update(metaPayload)
+            .eq('id', existingMeta.id);
+          if (metaUpdErr) throw metaUpdErr;
+        } else {
+          const { error: metaInsErr } = await supabase
+            .from('product_web_meta')
+            .insert(metaPayload);
+          if (metaInsErr) throw metaInsErr;
+        }
+      }
+
+      // Gallery: delete-all then re-insert (simplest, safest with unique partial primary index)
+      const { error: delErr } = await supabase.from('product_images').delete().eq('product_id', productId);
+      if (delErr) throw delErr;
+      const rows = galleryImages.map((g, idx) => ({
+        product_id: productId,
+        url: g.url,
+        alt_text: g.alt_text || null,
+        sort_order: idx,
+        is_primary: g.is_primary,
+      }));
+      if (rows.length > 0) {
+        // Enforce exactly one primary
+        let primarySeen = false;
+        rows.forEach(r => {
+          if (r.is_primary) {
+            if (primarySeen) r.is_primary = false;
+            primarySeen = true;
+          }
+        });
+        if (!primarySeen) rows[0].is_primary = true;
+        const { error: imgErr } = await supabase.from('product_images').insert(rows);
+        if (imgErr) throw imgErr;
+      }
     };
     try {
       if (editing) {
         const { error: productErr } = await supabase.from('products').update(basePayload).eq('id', editing.id);
         if (productErr) throw productErr;
+        await persistWebData(editing.id);
 
         // Save gemstone pieces inline
         if (form.product_type === 'gemstone') {
@@ -366,6 +583,7 @@ export default function Inventory() {
         const { data: newProduct, error: insertErr } = await supabase.from('products').insert(createPayload).select().maybeSingle();
         if (insertErr) throw insertErr;
         if (newProduct) {
+          await persistWebData(newProduct.id);
           // Save inline gemstone pieces for new product
           if (form.product_type === 'gemstone') {
             const weightUnit: 'g' | 'kg' | 'carat' = form.weight_unit === 'carats' ? 'carat' : form.weight_unit === 'kg' ? 'kg' : 'g';
@@ -421,7 +639,26 @@ export default function Inventory() {
       setShowModal(false);
       loadData();
     } catch (err: unknown) {
-      toast.error(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
+      // Friendly rewrite of the "Insufficient stock" CHECK violation:
+      // turns the raw "product <uuid> in godown <uuid> would become <n>"
+      // into a sentence using the product/variant + godown names we already
+      // have loaded on this page.
+      const raw = formatError(err);
+      const m = raw.match(/Insufficient stock: product ([0-9a-f-]+) in godown ([0-9a-f-]+) would become (-?[\d.]+)/i);
+      let friendly = raw;
+      if (m) {
+        const [, , godownId, becomesStr] = m;
+        const godownName = godowns.find(g => g.id === godownId)?.name || 'this warehouse';
+        const productName = editing?.name || form.name || 'this product';
+        const becomes = parseFloat(becomesStr);
+        const shortBy = Math.abs(becomes);
+        friendly =
+          `Cannot save: ${productName} in ${godownName} would go below zero ` +
+          `(short by ${shortBy}). Reduce the quantity you are removing, or ` +
+          `add stock first.`;
+      }
+      toast.error(`Save failed: ${friendly}`);
+      console.error('[Inventory] save failed:', err);
     }
   };
 
@@ -466,7 +703,8 @@ export default function Inventory() {
       const { error } = await supabase.rpc('safe_delete_product', { p_product_id: p.id });
       if (error) throw error;
     } catch (err: unknown) {
-      toast.error(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`Delete failed: ${formatError(err)}`);
+      console.error('[Inventory] delete failed:', err);
       return;
     }
     setConfirmProduct(null);
@@ -908,11 +1146,48 @@ export default function Inventory() {
 
           <div className="grid grid-cols-3 gap-2">
             <div>
-              <label className="label">Category</label>
-              <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value as Product['category'] }))} className="input text-xs">
-                <option>Astro Products</option>
-                <option>Vastu Items</option>
-                <option>Healing Items</option>
+              <label className="label">Main Category</label>
+              <select
+                value={form.category}
+                onChange={e => {
+                  const next = e.target.value;
+                  // When the main category changes, clear the sub-category so
+                  // we never persist a sub that doesn't belong to its parent.
+                  setForm(f => ({ ...f, category: next, sub_category: '' }));
+                }}
+                className="input text-xs"
+              >
+                {/*
+                  Show legacy categories (e.g. "Astro Products") that aren't
+                  in the new taxonomy as an extra option so existing rows
+                  keep showing their saved value until edited.
+                */}
+                {form.category && !isKnownMainCategory(form.category) && (
+                  <option value={form.category}>{form.category} (existing)</option>
+                )}
+                {MAIN_CATEGORIES.map(m => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">Sub-Category</label>
+              <select
+                value={form.sub_category}
+                onChange={e => setForm(f => ({ ...f, sub_category: e.target.value }))}
+                className="input text-xs"
+                disabled={!isKnownMainCategory(form.category)}
+              >
+                <option value="">— Select —</option>
+                {/* Show a saved sub that doesn't belong to the current main
+                    list (legacy / mismatched data) as an "(existing)" option. */}
+                {form.sub_category &&
+                  !getSubCategories(form.category).includes(form.sub_category) && (
+                    <option value={form.sub_category}>{form.sub_category} (existing)</option>
+                  )}
+                {getSubCategories(form.category).map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
               </select>
             </div>
             {form.product_type === 'weight' ? (
@@ -947,6 +1222,25 @@ export default function Inventory() {
             <div>
               <label className="label">Vastu Direction</label>
               <input value={form.direction} onChange={e => setForm(f => ({ ...f, direction: e.target.value }))} className="input text-xs" placeholder="N, S, NE..." />
+            </div>
+            {/*
+              Shipping weight in grams. Used by the website cart to look up
+              the courier slab in `shipping_rates`. Shown for every product
+              type — for gemstone products it doubles as average per-piece
+              weight (legacy behaviour). Leaving it blank means the website
+              uses the global `default_weight_grams_fallback` setting.
+            */}
+            <div>
+              <label className="label">Shipping Weight (g)</label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={form.weight_grams}
+                onChange={e => setForm(f => ({ ...f, weight_grams: e.target.value }))}
+                className="input text-xs"
+                placeholder="e.g. 500"
+              />
             </div>
           </div>
 
@@ -1165,6 +1459,248 @@ export default function Inventory() {
             <label className="label">Description</label>
             <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} className="input resize-none h-16" placeholder="Optional description..." />
           </div>
+
+          {/* Website section */}
+          <div className="col-span-2 border-t border-neutral-200 dark:border-neutral-700 pt-3 mt-1">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Globe size={14} className="text-emerald-600" />
+                <span className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">Website</span>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer text-xs">
+                <input
+                  type="checkbox"
+                  checked={form.show_on_website}
+                  onChange={e => setForm(f => ({ ...f, show_on_website: e.target.checked }))}
+                  className="rounded"
+                />
+                <span className="text-neutral-700 dark:text-neutral-300">Show on website</span>
+              </label>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (!webMetaOpen && autoSlug && !webMeta.slug && form.name) {
+                  setWebMeta(m => ({ ...m, slug: slugify(form.name) }));
+                }
+                setWebMetaOpen(o => !o);
+              }}
+              className="text-[11px] text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
+            >
+              {webMetaOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              {webMetaOpen ? 'Hide' : 'Show'} web metadata & gallery
+            </button>
+          </div>
+
+          {webMetaOpen && (
+            <>
+              <div>
+                <label className="label">Slug</label>
+                <input
+                  type="text"
+                  value={webMeta.slug}
+                  onChange={e => { setAutoSlug(false); setWebMeta(m => ({ ...m, slug: e.target.value })); }}
+                  className="input text-xs"
+                  placeholder="my-product-slug"
+                />
+                <button
+                  type="button"
+                  onClick={() => { setWebMeta(m => ({ ...m, slug: slugify(form.name) })); setAutoSlug(true); }}
+                  className="text-[10px] text-neutral-500 hover:text-emerald-600 mt-0.5"
+                >
+                  Auto-generate from name
+                </button>
+              </div>
+              <div>
+                <label className="label">Tagline</label>
+                <input
+                  type="text"
+                  value={webMeta.tagline}
+                  onChange={e => setWebMeta(m => ({ ...m, tagline: e.target.value }))}
+                  className="input text-xs"
+                  placeholder="Short catchy phrase"
+                />
+              </div>
+
+              <div className="col-span-2">
+                <label className="label">Vastu Direction(s)</label>
+                <div className="flex flex-wrap gap-1 mb-1.5">
+                  {webMeta.vastu_direction.map((c, i) => (
+                    <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 text-[11px]">
+                      {c}
+                      <button type="button" onClick={() => removeChip('vastu_direction', i)} className="hover:text-red-600">
+                        <X size={10} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  className="input text-xs"
+                  placeholder="Type direction (e.g. North) and press Enter or comma"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ',') {
+                      e.preventDefault();
+                      addChip('vastu_direction', (e.target as HTMLInputElement).value);
+                      (e.target as HTMLInputElement).value = '';
+                    }
+                  }}
+                  onBlur={e => { if (e.target.value) { addChip('vastu_direction', e.target.value); e.target.value = ''; } }}
+                />
+              </div>
+
+              <div className="col-span-2">
+                <label className="label">Vastu Benefit(s)</label>
+                <div className="flex flex-wrap gap-1 mb-1.5">
+                  {webMeta.vastu_benefit.map((c, i) => (
+                    <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[11px]">
+                      {c}
+                      <button type="button" onClick={() => removeChip('vastu_benefit', i)} className="hover:text-red-600">
+                        <X size={10} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  className="input text-xs"
+                  placeholder="Type benefit (e.g. Wealth) and press Enter or comma"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ',') {
+                      e.preventDefault();
+                      addChip('vastu_benefit', (e.target as HTMLInputElement).value);
+                      (e.target as HTMLInputElement).value = '';
+                    }
+                  }}
+                  onBlur={e => { if (e.target.value) { addChip('vastu_benefit', e.target.value); e.target.value = ''; } }}
+                />
+              </div>
+
+              <div className="col-span-2">
+                <label className="label">Placement Note</label>
+                <textarea
+                  value={webMeta.placement_note}
+                  onChange={e => setWebMeta(m => ({ ...m, placement_note: e.target.value }))}
+                  className="input resize-none h-14 text-xs"
+                  placeholder="Where to place this item..."
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="label">Where to Use</label>
+                <textarea
+                  value={webMeta.where_to_use}
+                  onChange={e => setWebMeta(m => ({ ...m, where_to_use: e.target.value }))}
+                  className="input resize-none h-14 text-xs"
+                  placeholder="Suggested rooms, situations..."
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="label">Expected Results</label>
+                <textarea
+                  value={webMeta.expected_results}
+                  onChange={e => setWebMeta(m => ({ ...m, expected_results: e.target.value }))}
+                  className="input resize-none h-14 text-xs"
+                  placeholder="Benefits the user can expect..."
+                />
+              </div>
+
+              {/*
+                "Published on website" checkbox removed — it duplicated
+                "Show on website" (top of modal). The is_published flag is
+                still written on save in lockstep with show_on_website so
+                website RLS policies (which gate on is_published) keep
+                working without any DB change.
+              */}
+
+              {/* Gallery */}
+              <div className="col-span-2 border-t border-neutral-200 dark:border-neutral-700 pt-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+                    Gallery ({galleryImages.length})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => galleryFileRef.current?.click()}
+                    disabled={galleryUploading}
+                    className="btn-secondary text-[11px] flex items-center gap-1 disabled:opacity-50"
+                  >
+                    <Upload size={12} />
+                    {galleryUploading ? 'Uploading...' : 'Add Images'}
+                  </button>
+                  <input
+                    ref={galleryFileRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleGalleryUpload}
+                    className="hidden"
+                  />
+                </div>
+                {galleryImages.length === 0 ? (
+                  <p className="text-[11px] text-neutral-400 italic">No gallery images yet</p>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {galleryImages.map((g, i) => (
+                      <div key={g.id} className="relative border border-neutral-200 dark:border-neutral-700 rounded p-1.5 bg-neutral-50 dark:bg-neutral-800/50">
+                        <div className="aspect-square bg-white dark:bg-neutral-900 rounded overflow-hidden mb-1">
+                          <img src={g.url} alt={g.alt_text} className="w-full h-full object-cover" />
+                        </div>
+                        {g.is_primary && (
+                          <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-amber-500 text-white text-[9px] font-semibold flex items-center gap-0.5">
+                            <Star size={8} fill="currentColor" /> PRIMARY
+                          </span>
+                        )}
+                        <input
+                          type="text"
+                          value={g.alt_text}
+                          onChange={e => setGalleryImages(prev => prev.map((it, idx) => idx === i ? { ...it, alt_text: e.target.value } : it))}
+                          placeholder="Alt text"
+                          className="input text-[10px] py-1 mb-1"
+                        />
+                        <div className="flex items-center justify-between gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => moveGalleryItem(i, -1)}
+                            disabled={i === 0}
+                            className="p-1 rounded hover:bg-neutral-200 dark:hover:bg-neutral-700 disabled:opacity-30"
+                            title="Move up"
+                          >
+                            <ArrowUp size={11} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveGalleryItem(i, 1)}
+                            disabled={i === galleryImages.length - 1}
+                            className="p-1 rounded hover:bg-neutral-200 dark:hover:bg-neutral-700 disabled:opacity-30"
+                            title="Move down"
+                          >
+                            <ArrowDown size={11} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPrimaryGalleryItem(i)}
+                            disabled={g.is_primary}
+                            className="p-1 rounded hover:bg-amber-100 dark:hover:bg-amber-900/30 text-amber-600 disabled:opacity-30"
+                            title="Set primary"
+                          >
+                            <Star size={11} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeGalleryItem(i)}
+                            className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600"
+                            title="Remove"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </Modal>
 

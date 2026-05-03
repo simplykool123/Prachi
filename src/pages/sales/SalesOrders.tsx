@@ -78,6 +78,23 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
   const [openRowMenu, setOpenRowMenu] = useState<string | null>(null);
   const [lineUnits, setLineUnits] = useState<Record<number, ProductUnit[]>>({});
   const [variantsMap, setVariantsMap] = useState<Record<string, ProductVariant[]>>({});
+  const [bundleNameMap, setBundleNameMap] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    // Defensive: product_bundles only exists after migration 0006. If the
+    // table isn't there yet, silently skip — the page must keep working.
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase.from('product_bundles').select('id, name');
+        if (cancelled || error || !data) return;
+        const map: Record<string, string> = {};
+        for (const b of data as Array<{ id: string; name: string }>) map[b.id] = b.name;
+        setBundleNameMap(map);
+      } catch { /* table missing — bundle grouping just won't show names */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const customerSelectRef = useRef<HTMLSelectElement>(null);
@@ -262,8 +279,23 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
       if (!rowItems[id]) {
         const session = await ensureSessionForApi();
         if (!session) return;
-        const { data } = await supabase.from('sales_order_items').select('*').eq('sales_order_id', id);
-        setRowItems(prev => ({ ...prev, [id]: data || [] }));
+        // Note: do NOT order by bundle_id at the DB level — that column is
+        // only present after migration 0006 is applied. Sort client-side so
+        // this query keeps working on un-migrated databases too.
+        const { data } = await supabase
+          .from('sales_order_items')
+          .select('*')
+          .eq('sales_order_id', id)
+          .order('id', { ascending: true });
+        const sorted = (data || []).slice().sort((a, b) => {
+          const ab = (a as SalesOrderItem).bundle_id || '';
+          const bb = (b as SalesOrderItem).bundle_id || '';
+          if (ab === bb) return 0;
+          if (!ab) return 1;
+          if (!bb) return -1;
+          return ab < bb ? -1 : 1;
+        });
+        setRowItems(prev => ({ ...prev, [id]: sorted }));
       }
     }
     setExpandedRows(next);
@@ -1052,6 +1084,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                 <th className="table-header text-left">Customer</th>
                 <th className="table-header text-left">Date</th>
                 <th className="table-header text-right">Amount</th>
+                <th className="table-header text-right">Parcel</th>
                 <th className="table-header text-left">Status</th>
                 <th className="table-header text-right">Actions</th>
               </tr>
@@ -1074,8 +1107,37 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                       {o.customer_phone && <p className="text-[10px] text-neutral-400 mt-0.5">{o.customer_phone}</p>}
                     </td>
                     <td className="table-cell text-xs text-neutral-500">{formatDate(o.so_date)}</td>
-                    <td className="table-cell text-right text-xs font-semibold text-neutral-800">{formatCurrency(o.total_amount)}</td>
-                    <td className="table-cell"><StatusBadge status={o.status} /></td>
+                    <td className="table-cell text-right text-xs font-semibold text-neutral-800">
+                      {formatCurrency(o.total_amount)}
+                      {(o.courier_charges || 0) > 0 && (
+                        <p className="text-[10px] text-neutral-400 font-normal mt-0.5">
+                          incl. {formatCurrency(o.courier_charges)} ship
+                        </p>
+                      )}
+                    </td>
+                    <td className="table-cell text-right text-xs text-neutral-600">
+                      {o.shipping_weight_grams
+                        ? <span>{(o.shipping_weight_grams / 1000).toFixed(2)} kg</span>
+                        : <span className="text-neutral-300">—</span>}
+                    </td>
+                    <td className="table-cell">
+                      <div className="flex flex-col gap-1 items-start">
+                        <StatusBadge status={o.status} />
+                        {o.requires_shipping_quote && (
+                          <span
+                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider ${
+                              o.shipping_quote_status === 'accepted' ? 'bg-success-100 text-success-700' :
+                              o.shipping_quote_status === 'declined' ? 'bg-neutral-100 text-neutral-500' :
+                              o.shipping_quote_status === 'quoted'   ? 'bg-blue-100 text-blue-700' :
+                              'bg-warning-100 text-warning-700'
+                            }`}
+                            title="Heavy order — needs shipping quote"
+                          >
+                            Quote · {o.shipping_quote_status || 'pending'}
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="table-cell text-right">
                       <div className="flex items-center justify-end gap-1">
                         {(o.status === 'confirmed' || o.status === 'draft') && (
@@ -1103,7 +1165,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                   </tr>
                   {expandedRows.has(o.id) && (
                     <tr key={`${o.id}-items`} className="bg-neutral-50 border-b border-neutral-100">
-                      <td colSpan={7} className="px-10 py-3">
+                      <td colSpan={8} className="px-10 py-3">
                         {rowItems[o.id] ? (
                           <table className="w-full text-xs">
                             <thead>
@@ -1116,15 +1178,35 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                               </tr>
                             </thead>
                             <tbody>
-                              {rowItems[o.id].map((item, idx) => (
-                                <tr key={idx} className="border-t border-neutral-200">
-                                  <td className="py-1.5 text-neutral-700 font-medium">{item.product_name}</td>
-                                  <td className="py-1.5 text-right text-neutral-600">{item.quantity} {item.unit}</td>
-                                  <td className="py-1.5 text-right text-neutral-600">{formatCurrency(item.unit_price)}</td>
-                                  {o.is_b2b && <td className="py-1.5 text-right text-neutral-500">{item.b2b_price ? formatCurrency(item.b2b_price) : '-'}</td>}
-                                  <td className="py-1.5 text-right font-semibold text-neutral-800">{formatCurrency(item.total_price)}</td>
-                                </tr>
-                              ))}
+                              {(() => {
+                                const its = rowItems[o.id];
+                                const colSpan = o.is_b2b ? 5 : 4;
+                                const elements: React.ReactNode[] = [];
+                                let lastBundleId: string | null | undefined = undefined;
+                                its.forEach((item, idx) => {
+                                  const bId = item.bundle_id || null;
+                                  if (bId && bId !== lastBundleId) {
+                                    elements.push(
+                                      <tr key={`bundle-${idx}`} className="bg-primary-50/50 border-t border-primary-100">
+                                        <td colSpan={colSpan} className="py-1 px-2 text-[10px] font-bold uppercase tracking-wider text-primary-700">
+                                          Bundle: {bundleNameMap[bId] || 'Combo Offer'}
+                                        </td>
+                                      </tr>
+                                    );
+                                  }
+                                  lastBundleId = bId;
+                                  elements.push(
+                                    <tr key={idx} className={`border-t border-neutral-200 ${bId ? 'bg-primary-50/20' : ''}`}>
+                                      <td className={`py-1.5 text-neutral-700 font-medium ${bId ? 'pl-4' : ''}`}>{item.product_name}</td>
+                                      <td className="py-1.5 text-right text-neutral-600">{item.quantity} {item.unit}</td>
+                                      <td className="py-1.5 text-right text-neutral-600">{formatCurrency(item.unit_price)}</td>
+                                      {o.is_b2b && <td className="py-1.5 text-right text-neutral-500">{item.b2b_price ? formatCurrency(item.b2b_price) : '-'}</td>}
+                                      <td className="py-1.5 text-right font-semibold text-neutral-800">{formatCurrency(item.total_price)}</td>
+                                    </tr>
+                                  );
+                                });
+                                return elements;
+                              })()}
                             </tbody>
                           </table>
                         ) : (

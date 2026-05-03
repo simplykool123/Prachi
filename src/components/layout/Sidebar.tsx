@@ -4,7 +4,7 @@ import {
   Truck, BookOpen, Receipt, Zap, LogOut, Moon, RotateCcw,
   CalendarDays, CircleUser as UserCircle2, Settings,
   CreditCard, PackageCheck, Pencil, X, CheckCircle, Eye, EyeOff, ArrowLeftRight,
-  Bell, ExternalLink, Trash2
+  Bell, ExternalLink, Trash2, Inbox, ChevronDown, ChevronRight, Truck as TruckIcon
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -28,6 +28,15 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
   const [saveErr, setSaveErr] = useState('');
+  // Auto-expand the Shipments submenu when one of its children is active
+  const [shippingOpen, setShippingOpen] = useState<boolean>(
+    activePage === 'courier' || activePage === 'bulk-weight' || activePage === 'shipping-rates'
+  );
+  useEffect(() => {
+    if (activePage === 'courier' || activePage === 'bulk-weight' || activePage === 'shipping-rates') {
+      setShippingOpen(true);
+    }
+  }, [activePage]);
 
   useEffect(() => {
     const loadBadges = async () => {
@@ -149,7 +158,7 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
   };
 
   const SectionLabel = ({ label }: { label: string }) => (
-    <p className="px-2.5 pt-2 pb-0.5 text-[9px] font-bold text-neutral-400 uppercase tracking-widest">{label}</p>
+    <p className="px-2.5 pt-1.5 pb-0.5 text-[9px] font-bold text-neutral-400 uppercase tracking-widest">{label}</p>
   );
 
   return (
@@ -169,25 +178,45 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
         </div>
 
         <nav className="flex-1 px-2 py-1.5 overflow-y-auto space-y-0">
-          <div className="space-y-0.5">
+          <div className="space-y-0">
             <NavItem id="dashboard" label="Dashboard" icon={LayoutDashboard} />
           </div>
 
           <SectionLabel label="CRM" />
-          <div className="space-y-0.5">
+          <div className="space-y-0">
             <NavItem id="crm" label="Clients" icon={UserCircle2} />
             <NavItem id="calendar" label="Schedule" icon={CalendarDays} />
+            <NavItem id="inquiry-leads" label="Inquiry Leads" icon={Inbox} />
           </div>
 
           {canAccessSales && (
             <>
               <SectionLabel label="Sales" />
-              <div className="space-y-0.5">
+              <div className="space-y-0">
                 <NavItem id="sales-orders" label="Sales Orders" icon={FileText} />
                 <NavItem id="challans" label="Delivery Challans" icon={Truck} />
                 <NavItem id="invoices" label="Invoices" icon={Receipt} badge={unpaidInvoices} />
                 <NavItem id="sales-returns" label="Returns" icon={RotateCcw} />
-                <NavItem id="courier" label="Shipments" icon={PackageCheck} />
+                {/* Shipments group: courier tracking + shipping config in one collapsible parent. */}
+                <div>
+                  <button
+                    onClick={() => setShippingOpen(o => !o)}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-neutral-500 hover:bg-orange-50 hover:text-primary-700 transition-all duration-150 text-left group"
+                  >
+                    <PackageCheck className="w-3.5 h-3.5 shrink-0 text-neutral-400 group-hover:text-primary-600" />
+                    <span className="truncate leading-none flex-1">Shipments</span>
+                    {shippingOpen
+                      ? <ChevronDown className="w-3 h-3 text-neutral-400" />
+                      : <ChevronRight className="w-3 h-3 text-neutral-400" />}
+                  </button>
+                  {shippingOpen && (
+                    <div className="ml-4 mt-0.5 pl-2 border-l border-neutral-100 space-y-0">
+                      <NavItem id="courier" label="Track Parcels" icon={TruckIcon} />
+                      <NavItem id="bulk-weight" label="Bulk Weights" icon={Package} />
+                      {isAdmin && <NavItem id="shipping-rates" label="Shipping Rates" icon={Package} />}
+                    </div>
+                  )}
+                </div>
                 {/* Deprecated - replaced by B2B Sales Order flow */}
               </div>
             </>
@@ -196,11 +225,12 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
           {canAccessInventory && (
             <>
               <SectionLabel label="Inventory" />
-              <div className="space-y-0.5">
+              <div className="space-y-0">
                 {isAdmin && <NavItem id="purchase" label="Purchases" icon={ShoppingCart} />}
                 <NavItem id="inventory" label="Products" icon={Package} />
                 <NavItem id="godown-stock" label="Stock" icon={BarChart2} />
                 <NavItem id="godown-transfer" label="Transfers" icon={ArrowLeftRight} />
+                <NavItem id="bundles" label="Bundles" icon={Package} />
               </div>
             </>
           )}
@@ -208,7 +238,7 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
           {canAccessExpenses && (
             <>
               <SectionLabel label="Finance" />
-              <div className="space-y-0.5">
+              <div className="space-y-0">
                 {canAccessFinance && <NavItem id="ledger" label="Ledger" icon={BookOpen} />}
                 <NavItem id="expenses" label="Expenses" icon={CreditCard} />
                 {canAccessFinance && <NavItem id="journal" label="Journal" icon={FileText} />}
@@ -217,7 +247,7 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
           )}
 
           <SectionLabel label="Analytics" />
-          <div className="space-y-0.5">
+          <div className="space-y-0">
             <NavItem id="reports" label="Reports" icon={BarChart2} />
             {isAdmin && <NavItem id="automation" label="Automation" icon={Zap} />}
           </div>
@@ -225,7 +255,7 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
           {isAdmin && (
             <>
               <SectionLabel label="Admin" />
-              <div className="space-y-0.5">
+              <div className="space-y-0">
                 <NavItem id="settings" label="Settings" icon={Settings} />
               </div>
             </>

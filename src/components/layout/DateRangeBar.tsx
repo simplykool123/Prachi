@@ -3,7 +3,7 @@ import { Calendar, ChevronDown, RefreshCw } from 'lucide-react';
 import { useDateRange } from '../../contexts/DateRangeContext';
 
 export default function DateRangeBar() {
-  const { dateRange, setDateRange, resetToThisMonth, resetToThisYear, label } = useDateRange();
+  const { dateRange, setDateRange, resetToThisMonth, resetToThisYear, resetToYearToDate, label } = useDateRange();
   const [open, setOpen] = useState(false);
   const [tempFrom, setTempFrom] = useState(dateRange.from);
   const [tempTo, setTempTo] = useState(dateRange.to);
@@ -18,8 +18,11 @@ export default function DateRangeBar() {
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
   const presets = [
-    { label: 'This Month', action: () => { resetToThisMonth(); setOpen(false); } },
-    { label: 'This Year',  action: () => { resetToThisYear();  setOpen(false); } },
+    // Year-to-date is now the system-wide default — keep it as the first
+    // quick-select so it's a single click to come back to.
+    { label: 'Year to Date', action: () => { resetToYearToDate(); setOpen(false); } },
+    { label: 'This Month',   action: () => { resetToThisMonth();  setOpen(false); } },
+    { label: 'This Year',    action: () => { resetToThisYear();   setOpen(false); } },
     {
       label: 'Last Month', action: () => {
         const now = new Date();
@@ -85,7 +88,7 @@ export default function DateRangeBar() {
                 </div>
               </div>
               <div className="flex gap-2">
-                <button onClick={() => { resetToThisMonth(); setOpen(false); }} className="btn-ghost flex-1 justify-center gap-1">
+                <button onClick={() => { resetToYearToDate(); setOpen(false); }} className="btn-ghost flex-1 justify-center gap-1">
                   <RefreshCw className="w-3 h-3" /> Reset
                 </button>
                 <button onClick={handleApply} className="btn-primary flex-1 justify-center">Apply</button>
