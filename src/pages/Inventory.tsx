@@ -906,50 +906,48 @@ export default function Inventory() {
       </div>
 
       <div className="p-6 space-y-4">
-        <div className="grid grid-cols-3 gap-4">
-          <div className="col-span-2 card">
-            <div className="flex items-center gap-6 flex-wrap">
-              <div>
-                <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider mb-2">Category</p>
-                <div className="flex gap-1.5 flex-wrap">
-                  {CATEGORIES.map(c => (
-                    <button key={c} onClick={() => setCategory(c)}
-                      className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${category === c ? 'bg-primary-600 text-white' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}>
-                      {c}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider mb-2">Stock</p>
-                <div className="flex gap-1.5">
-                  {['All', 'In Stock', 'Low Alert', 'Out of Stock'].map(s => (
-                    <button key={s} onClick={() => setStockStatus(s)}
-                      className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${stockStatus === s ? 'bg-neutral-800 text-white' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}>
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="ml-auto">
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
-                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search..." className="input pl-8 w-44 text-xs" />
-                </div>
-              </div>
-            </div>
+        <div className="flex items-center gap-3">
+          {/* Category dropdown */}
+          <div className="relative">
+            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400 pointer-events-none" />
+            <select
+              value={category}
+              onChange={e => setCategory(e.target.value)}
+              className={`input pr-8 text-xs appearance-none cursor-pointer ${category !== 'All' ? 'border-primary-400 bg-primary-50 text-primary-700 font-semibold' : ''}`}
+            >
+              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
           </div>
-          <div className="card flex flex-col justify-center">
-            <p className="text-[10px] font-semibold text-primary-600 uppercase tracking-wider">{isAdmin ? 'Inventory Valuation' : 'Total Products'}</p>
-            <p className="text-3xl font-bold text-neutral-900 mt-1">{isAdmin ? formatCurrency(totalValuation) : products.length}</p>
-            <div className="flex items-center gap-2 mt-1.5">
-              {lowStockCount > 0 && (
-                <span className="flex items-center gap-1 text-xs text-warning-600 bg-warning-50 px-2 py-0.5 rounded-full">
-                  <AlertTriangle className="w-3 h-3" /> {lowStockCount} low
-                </span>
-              )}
-              <span className="text-xs text-neutral-400">{products.length} products</span>
+
+          {/* Stock dropdown */}
+          <div className="relative">
+            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400 pointer-events-none" />
+            <select
+              value={stockStatus}
+              onChange={e => setStockStatus(e.target.value)}
+              className={`input pr-8 text-xs appearance-none cursor-pointer ${stockStatus !== 'All' ? 'border-neutral-600 bg-neutral-800 text-white font-semibold' : ''}`}
+            >
+              {['All', 'In Stock', 'Low Alert', 'Out of Stock'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Stock' : s}</option>)}
+            </select>
+          </div>
+
+          {/* Search */}
+          <div className="relative flex-1 max-w-xs">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search products…" className="input pl-8 w-full text-xs" />
+          </div>
+
+          <div className="ml-auto flex items-center gap-3">
+            {lowStockCount > 0 && (
+              <span className="flex items-center gap-1 text-xs text-warning-600 bg-warning-50 border border-warning-200 px-2.5 py-1 rounded-full font-medium">
+                <AlertTriangle className="w-3 h-3" /> {lowStockCount} low stock
+              </span>
+            )}
+            <div className="text-right">
+              <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">{isAdmin ? 'Inventory Value' : 'Products'}</p>
+              <p className="text-lg font-bold text-neutral-900 leading-tight">{isAdmin ? formatCurrency(totalValuation) : products.length}</p>
             </div>
+            <span className="text-xs text-neutral-400 bg-neutral-100 px-2.5 py-1 rounded-full">{filtered.length} shown</span>
           </div>
         </div>
 
