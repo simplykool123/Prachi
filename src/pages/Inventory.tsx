@@ -13,7 +13,7 @@ import type { Company } from '../lib/companiesService';
 import { processStockMovement, addGemPieces, removeGemPieces, updateGemPieceMetadata, markGemPiecesSold, setVariantGodownStock } from '../services/stockService';
 import { useToast } from '../components/ui/Toast';
 
-const CATEGORIES = ['All', 'Astro Products', 'Vastu Items', 'Healing Items'] as const;
+const CATEGORIES = ['All', 'Astro Products', 'Vastu Items', 'Healing Items', 'Gemstones', 'Crystals', 'Pyramids', 'Feng Shui', 'Vastu & Yantras', 'Handicraft', 'Dowsing', 'Services'] as const;
 const UNITS = ['pcs', 'grams', 'kg', 'sets', 'ml', 'liters'];
 
 export default function Inventory() {

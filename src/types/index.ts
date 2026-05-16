@@ -192,7 +192,7 @@ export interface PurchaseEntry {
   outstanding_amount: number;
   status: 'unpaid' | 'partial' | 'paid' | 'cancelled';
   expected_delivery_date?: string;
-  delivery_status: 'Pending' | 'In Transit' | 'Delivered' | 'Delayed';
+  delivery_status: 'Pending' | 'In Transit' | 'Partial' | 'Delivered' | 'Delayed';
   received_qty: number;
   notes?: string;
   items?: PurchaseEntryItem[];
@@ -244,8 +244,10 @@ export interface PurchaseEntryItem {
   product_name: string;
   unit: string;
   quantity: number;
+  received_qty?: number;
   unit_price: number;
   total_price: number;
+  variant_id?: string | null;
 }
 
 export interface Customer {

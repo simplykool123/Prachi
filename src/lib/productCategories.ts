@@ -77,6 +77,14 @@ export const CATEGORY_TREE: ReadonlyArray<CategoryNode> = [
       'L Dowsing Rod',
     ],
   },
+  {
+    main: 'Gemstones',
+    subs: [],
+  },
+  {
+    main: 'Services',
+    subs: [],
+  },
 ];
 
 export const MAIN_CATEGORIES: ReadonlyArray<string> =

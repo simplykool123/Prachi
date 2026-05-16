@@ -12,11 +12,12 @@ import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useToast } from '../components/ui/Toast';
 import type { PurchaseEntry, PurchaseEntryItem, Product, ProductVariant, ProductType, Supplier, Godown } from '../types';
 
-type DeliveryStatus = 'Pending' | 'In Transit' | 'Delivered' | 'Delayed' | 'Cancelled';
+type DeliveryStatus = 'Pending' | 'In Transit' | 'Partial' | 'Delivered' | 'Delayed' | 'Cancelled';
 
 const DELIVERY_STATUS_COLORS: Record<DeliveryStatus, string> = {
   'Pending': 'bg-neutral-100 text-neutral-600',
   'In Transit': 'bg-blue-100 text-blue-700',
+  'Partial': 'bg-amber-100 text-amber-700',
   'Delivered': 'bg-success-100 text-success-700',
   'Delayed': 'bg-error-100 text-error-700',
   'Cancelled': 'bg-error-100 text-error-700',
@@ -209,11 +210,7 @@ export default function Purchase() {
       }
       const pType = next[i].product_type || 'simple';
       if (pType === 'gemstone') {
-        const weights = parsePieceWeights(next[i].piece_weights || '');
-        const totalWeight = weights.reduce((s, w) => s + w, 0);
-        next[i].gemstone_weight = totalWeight;
-        next[i].quantity = String(weights.length);
-        next[i].total_price = totalWeight * (parseFloat(next[i].unit_price) || 0);
+        next[i].total_price = (parseFloat(next[i].quantity) || 0) * (parseFloat(next[i].unit_price) || 0);
       } else if (pType === 'weight') {
         const w = parseFloat(next[i].weight_input || '0') || 0;
         next[i].quantity = String(w);
@@ -234,7 +231,7 @@ export default function Purchase() {
 
   const openNewEntry = () => {
     setEditingEntry(null);
-    setForm({ supplier_id: '', supplier_name: '', entry_date: new Date().toISOString().split('T')[0], invoice_number: '', notes: '', godown_id: getDefaultGodownId(godowns), expected_delivery_date: '' });
+    setForm({ supplier_id: '', supplier_name: '', entry_date: new Date().toISOString().split('T')[0], invoice_number: '', notes: '', godown_id: '', expected_delivery_date: '' });
     setItems([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '', total_price: 0 }]);
     setShowModal(true);
   };
@@ -373,7 +370,7 @@ export default function Purchase() {
     const previousTotal = typeof receivingEntry.received_qty === 'number' ? receivingEntry.received_qty : 0;
     const newTotal = previousTotal + nowReceived;
     const totalOrdered = receiveItems.reduce((s, i) => s + i.ordered_qty, 0);
-    const newStatus: DeliveryStatus = newTotal >= totalOrdered ? 'Delivered' : 'In Transit';
+    const newStatus: DeliveryStatus = newTotal >= totalOrdered ? 'Delivered' : 'Partial';
 
     await supabase.from('purchase_entries').update({
       delivery_status: newStatus,
@@ -387,14 +384,6 @@ export default function Purchase() {
   };
 
   const handleSave = () => {
-    // Validate gemstone lines have piece weights entered
-    for (const item of items.filter(i => i.product_name && i.product_type === 'gemstone')) {
-      const weights = parsePieceWeights(item.piece_weights || '');
-      if (weights.length === 0) {
-        toast.error(`Please enter piece weights for gemstone product: ${item.product_name}`);
-        return;
-      }
-    }
     runSave(async () => {
 
     if (editingEntry) {
@@ -459,53 +448,6 @@ export default function Purchase() {
           };
         });
         await supabase.from('purchase_entry_items').insert(entryItemPayload);
-
-        // Create product_units for gemstone items and receive stock immediately
-        if (form.godown_id) {
-          for (const item of items.filter(i => i.product_id && i.product_type === 'gemstone')) {
-            const weights = parsePieceWeights(item.piece_weights || '');
-            if (weights.length > 0) {
-              const prod = products.find(p => p.id === item.product_id);
-              const wUnit: 'g' | 'kg' | 'carat' = prod?.weight_unit === 'carats' ? 'carat' : 'g';
-              await addGemPieces({
-                productId: item.product_id,
-                pieces: weights.map(weight => ({ weight, weightUnit: wUnit, godownId: form.godown_id })),
-                movementType: 'purchase',
-                referenceType: 'purchase_entry',
-                referenceId: entry.id,
-                referenceNumber: entryNumber,
-                notes: 'Purchase ' + entryNumber,
-              });
-            }
-          }
-
-          // Post stock for non-gemstone items only (gemstone stock posted inside addGemPieces above)
-          const stockItems = items
-            .filter(i => i.product_id && (parseFloat(i.quantity) || 0) > 0 && i.product_type !== 'gemstone')
-            .map(i => ({
-              product_id: i.product_id,
-              godown_id: form.godown_id,
-              quantity: parseFloat(i.quantity) || 0,
-              unit_price: parseFloat(i.unit_price) || 0,
-              variant_id: i.variant_id || null,
-            }));
-          if (stockItems.length > 0) {
-            await processStockMovement({
-              type: 'purchase',
-              items: stockItems,
-              reference_type: 'purchase_entry',
-              reference_id: entry.id,
-              reference_number: entryNumber,
-              notes: 'Purchase ' + entryNumber,
-            });
-          }
-
-          const totalQty = items.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0);
-          await supabase.from('purchase_entries').update({
-            delivery_status: 'Delivered',
-            received_qty: totalQty,
-          }).eq('id', entry.id);
-        }
 
         for (const item of items.filter(i => i.product_id)) {
           const prod = products.find(p => p.id === item.product_id);
@@ -667,8 +609,6 @@ export default function Purchase() {
   const filteredSuppliers = suppliers.filter(s => s.name.toLowerCase().includes(search.toLowerCase()));
   const totalPayable = entries.filter(e => e.status !== 'paid').reduce((s, e) => s + e.outstanding_amount, 0);
 
-  if (!isAdmin) return null;
-
   return (
     <div className="flex-1 overflow-y-auto bg-neutral-50">
       <div className="bg-white border-b border-neutral-100 px-5 py-3 flex items-center justify-between">
@@ -740,10 +680,10 @@ export default function Purchase() {
                 <tr>
                   <th className="table-header w-8" />
                   <th className="table-header text-left">Entry # / Products</th>
-                  <th className="table-header text-left">Supplier</th>
+                  {isAdmin && <th className="table-header text-left">Supplier</th>}
                   <th className="table-header text-left">Date</th>
                   <th className="table-header text-left">Exp. Delivery</th>
-                  <th className="table-header text-right">Amount / Payment</th>
+                  {isAdmin && <th className="table-header text-right">Amount / Payment</th>}
                   <th className="table-header text-left">Delivery</th>
                   <th className="table-header text-right">Actions</th>
                 </tr>
@@ -754,6 +694,15 @@ export default function Purchase() {
                   const cachedItems = entryItems[e.id] || [];
                   const productPreview = cachedItems.length > 0
                     ? cachedItems.slice(0, 3).map(i => i.product_name).join(', ') + (cachedItems.length > 3 ? ` +${cachedItems.length - 3}` : '')
+                    : null;
+                  const today = new Date().toISOString().split('T')[0];
+                  const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+                  const expDate = e.expected_delivery_date;
+                  const deliveryUrgency = ds !== 'Delivered' && ds !== 'Cancelled' && expDate
+                    ? expDate < today ? 'overdue'
+                    : expDate === today ? 'today'
+                    : expDate === tomorrow ? 'tomorrow'
+                    : null
                     : null;
 
                   return (
@@ -778,13 +727,15 @@ export default function Purchase() {
                             <p className="text-[10px] text-neutral-400 leading-tight mt-0.5 max-w-[160px] truncate">{productPreview}</p>
                           )}
                         </td>
-                        <td className="table-cell">
-                          <p className="text-sm font-medium text-neutral-800">{e.supplier_name}</p>
-                        </td>
+                        {isAdmin && (
+                          <td className="table-cell">
+                            <p className="text-sm font-medium text-neutral-800">{e.supplier_name}</p>
+                          </td>
+                        )}
                         <td className="table-cell">
                           <p className="text-xs text-neutral-500">{formatDate(e.entry_date)}</p>
                         </td>
-                        <td className="table-cell" onClick={() => setEditingDeliveryDate(e.id)}>
+                        <td className="table-cell" onClick={() => isAdmin && setEditingDeliveryDate(e.id)}>
                           {editingDeliveryDate === e.id ? (
                             <input
                               type="date"
@@ -799,23 +750,38 @@ export default function Purchase() {
                               onClick={ev => ev.stopPropagation()}
                             />
                           ) : (
-                            <div className="group cursor-pointer">
+                            <div className={isAdmin ? 'group cursor-pointer' : ''}>
                               {e.expected_delivery_date ? (
-                                <p className={`text-xs ${ds === 'Delayed' ? 'text-error-600 font-medium' : 'text-neutral-500'} group-hover:underline group-hover:text-primary-600`}>
-                                  {formatDate(e.expected_delivery_date)}
-                                </p>
+                                <div>
+                                  <p className={`text-xs ${ds === 'Delayed' ? 'text-error-600 font-medium' : 'text-neutral-500'} ${isAdmin ? 'group-hover:underline group-hover:text-primary-600' : ''}`}>
+                                    {formatDate(e.expected_delivery_date)}
+                                  </p>
+                                  {deliveryUrgency === 'overdue' && (
+                                    <span className="inline-block mt-0.5 text-[9px] font-bold bg-error-100 text-error-700 px-1.5 py-0.5 rounded">Overdue</span>
+                                  )}
+                                  {deliveryUrgency === 'today' && (
+                                    <span className="inline-block mt-0.5 text-[9px] font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Due Today</span>
+                                  )}
+                                  {deliveryUrgency === 'tomorrow' && (
+                                    <span className="inline-block mt-0.5 text-[9px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Due Tomorrow</span>
+                                  )}
+                                </div>
                               ) : (
-                                <p className="text-xs text-neutral-300 group-hover:text-primary-400">Click to set</p>
+                                <p className={`text-xs ${isAdmin ? 'text-neutral-300 group-hover:text-primary-400' : 'text-neutral-300'}`}>
+                                  {isAdmin ? 'Click to set' : '—'}
+                                </p>
                               )}
                             </div>
                           )}
                         </td>
-                        <td className="table-cell text-right">
-                          <p className="text-sm font-semibold text-neutral-900">{formatCurrency(e.total_amount)}</p>
-                          <p className={`text-[10px] font-medium mt-0.5 ${e.outstanding_amount > 0 ? 'text-error-600' : 'text-success-600'}`}>
-                            {e.outstanding_amount > 0 ? `${formatCurrency(e.outstanding_amount)} unpaid` : 'Paid'}
-                          </p>
-                        </td>
+                        {isAdmin && (
+                          <td className="table-cell text-right">
+                            <p className="text-sm font-semibold text-neutral-900">{formatCurrency(e.total_amount)}</p>
+                            <p className={`text-[10px] font-medium mt-0.5 ${e.outstanding_amount > 0 ? 'text-error-600' : 'text-success-600'}`}>
+                              {e.outstanding_amount > 0 ? `${formatCurrency(e.outstanding_amount)} unpaid` : 'Paid'}
+                            </p>
+                          </td>
+                        )}
                         <td className="table-cell">
                           <span className={`badge text-[10px] font-medium ${DELIVERY_STATUS_COLORS[ds]}`}>{ds}</span>
                         </td>
@@ -829,7 +795,7 @@ export default function Purchase() {
                                 <Truck className="w-3 h-3" /> Receive
                               </button>
                             )}
-                            {e.status === 'unpaid' && (
+                            {isAdmin && e.status === 'unpaid' && (
                               <button
                                 onClick={() => markPaid(e)}
                                 className="inline-flex items-center text-[10px] font-semibold text-primary-600 hover:text-primary-800 bg-primary-50 hover:bg-primary-100 px-2 py-1 rounded-md transition-colors whitespace-nowrap"
@@ -837,14 +803,16 @@ export default function Purchase() {
                                 Mark Paid
                               </button>
                             )}
-                            <button
-                              onClick={() => openEditEntry(e)}
-                              title="Edit"
-                              className="p-1.5 rounded-lg text-neutral-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                            </button>
-                            {e.status !== 'cancelled' && (
+                            {isAdmin && (
+                              <button
+                                onClick={() => openEditEntry(e)}
+                                title="Edit"
+                                className="p-1.5 rounded-lg text-neutral-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {isAdmin && e.status !== 'cancelled' && (
                               <button
                                 onClick={() => setConfirmEntry(e)}
                                 title="Cancel Entry"
@@ -858,29 +826,31 @@ export default function Purchase() {
                       </tr>
                       {expandedEntry === e.id && entryItems[e.id] && (
                         <tr key={`${e.id}-items`}>
-                          <td colSpan={8} className="bg-amber-50 px-8 py-3 border-b border-amber-100">
+                          <td colSpan={isAdmin ? 8 : 6} className="bg-amber-50 px-8 py-3 border-b border-amber-100">
                             <table className="w-full">
                               <thead>
                                 <tr className="text-[10px] text-neutral-500 uppercase tracking-wider">
                                   <th className="text-left pb-1 font-semibold">Product</th>
                                   <th className="text-right pb-1 font-semibold w-24">Ordered</th>
                                   <th className="text-right pb-1 font-semibold w-24">Received</th>
-                                  <th className="text-right pb-1 font-semibold w-28">Unit Price</th>
-                                  <th className="text-right pb-1 font-semibold w-28">Total</th>
+                                  {isAdmin && <th className="text-right pb-1 font-semibold w-28">Unit Price</th>}
+                                  {isAdmin && <th className="text-right pb-1 font-semibold w-28">Total</th>}
                                 </tr>
                               </thead>
                               <tbody>
                                 {entryItems[e.id].map(item => {
-                                  const recvd = typeof e.received_qty === 'number' ? e.received_qty : 0;
+                                  const recvd = typeof (item as any).received_qty === 'number'
+                                    ? (item as any).received_qty
+                                    : typeof e.received_qty === 'number' ? e.received_qty : 0;
                                   return (
                                     <tr key={item.id} className="text-xs">
                                       <td className="py-0.5 text-neutral-800 font-medium">{item.product_name}</td>
                                       <td className="py-0.5 text-right text-neutral-600">{item.quantity} {item.unit}</td>
                                       <td className={`py-0.5 text-right font-medium ${recvd >= item.quantity ? 'text-success-600' : recvd > 0 ? 'text-warning-600' : 'text-neutral-400'}`}>
-                                        {recvd >= item.quantity ? item.quantity : recvd > 0 ? recvd : '—'}
+                                        {recvd >= item.quantity ? <span>{item.quantity} ✓</span> : recvd > 0 ? recvd : '—'}
                                       </td>
-                                      <td className="py-0.5 text-right text-neutral-600">{formatCurrency(item.unit_price)}</td>
-                                      <td className="py-0.5 text-right font-semibold">{formatCurrency(item.total_price)}</td>
+                                      {isAdmin && <td className="py-0.5 text-right text-neutral-600">{formatCurrency(item.unit_price)}</td>}
+                                      {isAdmin && <td className="py-0.5 text-right font-semibold">{formatCurrency(item.total_price)}</td>}
                                     </tr>
                                   );
                                 })}
@@ -971,15 +941,6 @@ export default function Purchase() {
               <input type="date" value={form.entry_date} onChange={e => setForm(f => ({ ...f, entry_date: e.target.value }))} className="input" />
             </div>
             <div>
-              <label className="label flex items-center gap-1.5">
-                <Warehouse className="w-3.5 h-3.5 text-neutral-400" /> Receive Into Godown
-              </label>
-              <select value={form.godown_id} onChange={e => setForm(f => ({ ...f, godown_id: e.target.value }))} className="input">
-                <option value="">-- Select Godown (optional) --</option>
-                {godowns.map(g => <option key={g.id} value={g.id}>{g.name}{g.code ? ` (${g.code})` : ''}</option>)}
-              </select>
-            </div>
-            <div>
               <label className="label">Supplier Invoice #</label>
               <input value={form.invoice_number} onChange={e => setForm(f => ({ ...f, invoice_number: e.target.value }))} className="input" placeholder="Optional" />
             </div>
@@ -1016,8 +977,6 @@ export default function Purchase() {
                   {items.map((item, i) => {
                     const pType = item.product_type || 'simple';
                     const wLabel = item.weight_unit === 'carats' ? 'ct' : 'g';
-                    const weights = pType === 'gemstone' ? parsePieceWeights(item.piece_weights || '') : [];
-                    const totalWeight = weights.reduce((s, w) => s + w, 0);
                     const productVariants = item.product_id ? (variantsMap[item.product_id] || []) : [];
                     return (
                       <React.Fragment key={i}>
@@ -1042,10 +1001,7 @@ export default function Purchase() {
                           <td className="px-3 py-2 text-xs text-neutral-600 font-medium">{item.unit || 'pcs'}</td>
                           <td className="px-3 py-2">
                             {pType === 'gemstone' ? (
-                              <div className="text-right">
-                                <p className="text-sm font-semibold text-neutral-800">{weights.length}</p>
-                                <p className="text-[10px] text-neutral-400">pcs</p>
-                              </div>
+                              <input type="number" step="1" min="0" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)} className="input text-xs text-right" />
                             ) : pType === 'weight' ? (
                               <div>
                                 <input
@@ -1070,35 +1026,12 @@ export default function Purchase() {
                           </td>
                           <td className="px-3 py-2 text-right">
                             <p className="text-sm font-semibold">{formatCurrency(item.total_price)}</p>
-                            {pType === 'gemstone' && totalWeight > 0 && (
-                              <p className="text-[10px] text-neutral-400 mt-0.5">{totalWeight.toFixed(2)}{wLabel} &times; {formatCurrency(parseFloat(item.unit_price) || 0)}</p>
-                            )}
                             {pType === 'weight' && (parseFloat(item.weight_input || '0') || 0) > 0 && (
                               <p className="text-[10px] text-neutral-400 mt-0.5">{parseFloat(item.weight_input || '0').toFixed(3)}{wLabel} &times; {formatCurrency(parseFloat(item.unit_price) || 0)}</p>
                             )}
                           </td>
                           <td className="px-3 py-2"><button onClick={() => removeItem(i)} className="text-neutral-400 hover:text-error-500"><X className="w-3.5 h-3.5" /></button></td>
                         </tr>
-                        {pType === 'gemstone' && (
-                          <tr key={`gem-${i}`} className="border-t border-neutral-50 bg-amber-50/50">
-                            <td colSpan={6} className="px-3 py-2">
-                              <label className="text-[10px] font-semibold text-amber-700 uppercase tracking-wider block mb-1">
-                                Piece weights ({item.weight_unit === 'carats' ? 'carats' : 'grams'}) — one per line
-                              </label>
-                              <textarea
-                                value={item.piece_weights || ''}
-                                onChange={e => updateItem(i, 'piece_weights', e.target.value)}
-                                className="input text-xs resize-none h-20 w-full font-mono"
-                                placeholder={'2.3\n4.1\n1.8'}
-                              />
-                              {weights.length > 0 && (
-                                <p className="text-[10px] text-amber-700 mt-1 font-medium">
-                                  {weights.length} piece{weights.length !== 1 ? 's' : ''} &bull; Total weight: {totalWeight.toFixed(2)} {wLabel} &bull; Total: {formatCurrency(item.total_price)}
-                                </p>
-                              )}
-                            </td>
-                          </tr>
-                        )}
                       </React.Fragment>
                     );
                   })}

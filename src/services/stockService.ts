@@ -103,7 +103,6 @@ export async function processStockMovement({
       p_reference_id: reference_id ?? null,
       p_reference_number: reference_number ?? null,
       p_notes: notes ?? null,
-      p_variant_id: item.variant_id ?? null,
     });
     if (error) throw error;
   }
