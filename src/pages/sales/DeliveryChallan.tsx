@@ -16,6 +16,7 @@ import { useToast } from '../../components/ui/Toast';
 import type { DeliveryChallan as DCType, SalesOrder, SalesOrderItem } from '../../types';
 import type { ActivePage } from '../../types';
 import type { PageState } from '../../App';
+import { useDateRange } from '../../contexts/DateRangeContext';
 
 interface LineItem {
   product_id: string;
@@ -78,6 +79,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
   const { saving, run: runSave } = useAsyncAction();
   const { saving: deleting, run: runDelete } = useAsyncAction();
   const toast = useToast();
+  const { dateRange } = useDateRange();
   const [challans, setChallans] = useState<DCType[]>([]);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -102,7 +104,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
   const [form, setForm] = useState(emptyForm);
   const [items, setItems] = useState<LineItem[]>([{ product_id: '', product_name: '', unit: 'pcs', quantity: '1', unit_price: '0', discount_pct: '0', total_price: 0, godown_id: '' }]);
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, [dateRange.from, dateRange.to]);
   useVisibilityReload(loadData);
   useEffect(() => {
     if (!openRowMenu) return;
@@ -112,9 +114,8 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
   }, [openRowMenu]);
 
   async function loadData() {
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     const [challansRes, productsRes, customersRes, soRes, godownsRes] = await Promise.all([
-      supabase.from('delivery_challans').select('id, challan_number, sales_order_id, customer_id, customer_name, customer_phone, customer_address, customer_address2, customer_city, customer_state, customer_pincode, is_b2b, ship_to_name, ship_to_phone, ship_to_address1, ship_to_address2, ship_to_city, ship_to_state, ship_to_pin, challan_date, dispatch_mode, courier_company, tracking_number, status, notes, company_id, created_at').gte('challan_date', thirtyDaysAgo).order('created_at', { ascending: false }).limit(200),
+      supabase.from('delivery_challans').select('id, challan_number, sales_order_id, customer_id, customer_name, customer_phone, customer_address, customer_address2, customer_city, customer_state, customer_pincode, is_b2b, ship_to_name, ship_to_phone, ship_to_address1, ship_to_address2, ship_to_city, ship_to_state, ship_to_pin, challan_date, dispatch_mode, courier_company, tracking_number, status, notes, company_id, created_at').gte('challan_date', dateRange.from).lte('challan_date', dateRange.to).order('created_at', { ascending: false }).limit(500),
       supabase.from('products').select('id, name, unit, selling_price, company_id').eq('is_active', true).order('name', { ascending: true }),
       supabase.from('customers').select('id, name, phone, address, address2, city, state, pincode').eq('is_active', true).order('name'),
       supabase.from('sales_orders').select('id, so_number, customer_id, customer_name, status, is_b2b').order('created_at', { ascending: false }).limit(500),
