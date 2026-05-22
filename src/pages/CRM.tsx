@@ -6,7 +6,7 @@ import {
   Target, AlertCircle, ArrowRight, CheckCircle2, Hash, Compass, Trash2
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { formatCurrency, formatDate, exportToCSV } from '../lib/utils';
+import { formatCurrency, formatDate, exportToCSV, toTitleCase } from '../lib/utils';
 import { INDIA_STATES, STATE_CITIES, CUSTOMER_TAGS } from '../lib/indiaData';
 import Modal from '../components/ui/Modal';
 import EmptyState from '../components/ui/EmptyState';
@@ -1522,7 +1522,7 @@ export default function CRM() {
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2">
               <label className="label">Name *</label>
-              <input value={editCustomerForm.name} onChange={e => setEditCustomerForm(f => ({ ...f, name: e.target.value }))} className="input" />
+              <input value={editCustomerForm.name} onChange={e => setEditCustomerForm(f => ({ ...f, name: toTitleCase(e.target.value) }))} className="input" />
             </div>
             <div>
               <label className="label">Phone</label>
@@ -1901,7 +1901,7 @@ export default function CRM() {
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
             <label className="label">Name *</label>
-            <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="input" placeholder="Full name" />
+            <input value={form.name} onChange={e => setForm(f => ({ ...f, name: toTitleCase(e.target.value) }))} className="input" placeholder="Full name" />
           </div>
           <div>
             <label className="label">Phone</label>

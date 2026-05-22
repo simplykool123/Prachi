@@ -3,7 +3,7 @@ import { Plus, Search, FileText, ChevronDown, ChevronRight, Receipt, Truck, Down
 import { INDIA_STATES } from '../../lib/indiaData';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { supabase, getSessionWithRetry, runQueryWithGlobalRecovery } from '../../lib/supabase';
-import { formatCurrency, formatDate, generateId, nextDocNumber, exportToCSV, useVisibilityReload, getDefaultGodownId } from '../../lib/utils';
+import { formatCurrency, formatDate, generateId, nextDocNumber, exportToCSV, useVisibilityReload, getDefaultGodownId, toTitleCase } from '../../lib/utils';
 import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
@@ -1328,7 +1328,7 @@ export default function SalesOrders({ onNavigate }: SalesOrdersProps) {
                 </div>
                 <div>
                   <label className="label">Customer Name *</label>
-                  <input value={form.customer_name} onChange={e => setForm(f => ({ ...f, customer_name: e.target.value }))} className="input text-xs" placeholder="Full name" />
+                  <input value={form.customer_name} onChange={e => setForm(f => ({ ...f, customer_name: toTitleCase(e.target.value) }))} className="input text-xs" placeholder="Full name" />
                 </div>
                 <div className="col-span-2" />
               </div>

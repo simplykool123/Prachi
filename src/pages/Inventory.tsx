@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, ArrowUpDown, Search, BarChart2, AlertTriangle, ImagePlus, Download, History, Pencil, Trash2, Eye, X, MoreVertical, Layers, ChevronDown, ChevronRight, Globe, Star, ArrowUp, ArrowDown, Upload } from 'lucide-react';
 import { supabase, uploadProductImage, uploadProductGalleryImage, getSessionWithRetry, runQueryWithGlobalRecovery } from '../lib/supabase';
-import { formatCurrency, generateId, exportToCSV, formatDate, useVisibilityReload, formatError } from '../lib/utils';
+import { formatCurrency, generateId, exportToCSV, formatDate, useVisibilityReload, formatError, toTitleCase } from '../lib/utils';
 import { MAIN_CATEGORIES, getSubCategories, isKnownMainCategory } from '../lib/productCategories';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/ui/Modal';
@@ -1127,7 +1127,7 @@ export default function Inventory() {
             <div className="flex-1 grid grid-cols-2 gap-2">
               <div className="col-span-2">
                 <label className="label">Product Name *</label>
-                <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="input" placeholder="e.g., Natural Citrine Point" />
+                <input value={form.name} onChange={e => setForm(f => ({ ...f, name: toTitleCase(e.target.value) }))} className="input" placeholder="e.g., Natural Citrine Point" />
               </div>
               <div>
                 <label className="label">SKU</label>
@@ -1341,7 +1341,7 @@ export default function Inventory() {
                   <tbody>
                     {editingVariants.map((v, vi) => (
                       <tr key={v.id} className="border-t border-neutral-100">
-                        <td className="px-2 py-1.5"><input value={v.name} onChange={e => setEditingVariants(vs => { const n=[...vs]; n[vi]={...n[vi],name:e.target.value}; return n; })} className="input text-xs py-1" placeholder='e.g. 4 inch' /></td>
+                        <td className="px-2 py-1.5"><input value={v.name} onChange={e => setEditingVariants(vs => { const n=[...vs]; n[vi]={...n[vi],name:toTitleCase(e.target.value)}; return n; })} className="input text-xs py-1" placeholder='e.g. 4 inch' /></td>
                         {isAdmin && <td className="px-2 py-1.5"><input type="number" value={v.purchase_price} onChange={e => setEditingVariants(vs => { const n=[...vs]; n[vi]={...n[vi],purchase_price:parseFloat(e.target.value)||0}; return n; })} className="input text-xs py-1 text-right" /></td>}
                         <td className="px-2 py-1.5"><input type="number" value={v.selling_price} onChange={e => setEditingVariants(vs => { const n=[...vs]; n[vi]={...n[vi],selling_price:parseFloat(e.target.value)||0}; return n; })} className="input text-xs py-1 text-right" /></td>
                         <td className="px-2 py-1.5"><input type="number" value={v.stock_quantity} onChange={e => setEditingVariants(vs => { const n=[...vs]; n[vi]={...n[vi],stock_quantity:parseFloat(e.target.value)||0}; return n; })} className="input text-xs py-1 text-right" /></td>

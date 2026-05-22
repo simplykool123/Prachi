@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, Printer, Truck, Download, Eye, Pencil, Trash2, Send, Receipt, FileText, X, MoreVertical } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { formatDate, formatCurrency, generateId, nextDocNumber, exportToCSV, useVisibilityReload, getDefaultGodownId } from '../../lib/utils';
+import { formatDate, formatCurrency, generateId, nextDocNumber, exportToCSV, useVisibilityReload, getDefaultGodownId, toTitleCase } from '../../lib/utils';
 import { getSmartRate } from '../../lib/rateCardService';
 import Modal from '../../components/ui/Modal';
 import StatusBadge from '../../components/ui/StatusBadge';
@@ -661,7 +661,7 @@ export default function DeliveryChallan({ onNavigate }: DeliveryChallanProps) {
             </div>
             <div>
               <label className="label">Customer Name *</label>
-              <input value={form.customer_name} onChange={e => setForm(f => ({ ...f, customer_name: e.target.value }))} className="input text-xs" placeholder="Full name" />
+              <input value={form.customer_name} onChange={e => setForm(f => ({ ...f, customer_name: toTitleCase(e.target.value) }))} className="input text-xs" placeholder="Full name" />
             </div>
             <div>
               <label className="label">Challan Date</label>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Plus, Search, CreditCard, FileText, Download, Printer, Pencil, Eye, CheckCircle, XCircle, X, Truck } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { formatCurrency, formatDate, formatDateInput, generateId, nextDocNumber, exportToCSV, useVisibilityReload, getDefaultGodownId } from '../../lib/utils';
+import { formatCurrency, formatDate, formatDateInput, generateId, nextDocNumber, exportToCSV, useVisibilityReload, getDefaultGodownId, toTitleCase } from '../../lib/utils';
 import { useAsyncAction } from '../../hooks/useAsyncAction';
 import { useToast } from '../../components/ui/Toast';
 import Modal from '../../components/ui/Modal';
@@ -1233,7 +1233,7 @@ export default function Invoices({ onNavigate: _onNavigate, prefillFromDC }: Inv
 
             <div className="space-y-2">
               <p className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wider">Bill To</p>
-              <input value={form.customer_name} onChange={e => setForm(f => ({ ...f, customer_name: e.target.value }))} className="input text-xs" placeholder="Customer Name *" />
+              <input value={form.customer_name} onChange={e => setForm(f => ({ ...f, customer_name: toTitleCase(e.target.value) }))} className="input text-xs" placeholder="Customer Name *" />
               <input value={form.customer_address} onChange={e => setForm(f => ({ ...f, customer_address: e.target.value }))} className="input text-xs" placeholder="Address Line 1" />
               <input value={form.customer_address2} onChange={e => setForm(f => ({ ...f, customer_address2: e.target.value }))} className="input text-xs" placeholder="Address Line 2" />
               <div className="flex gap-1.5">

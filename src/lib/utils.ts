@@ -113,6 +113,12 @@ export const getStatusColor = (status: string): string => {
   return map[status] || 'bg-neutral-100 text-neutral-600';
 };
 
+/** Converts a string to Title Case — every word's first letter capitalised. */
+export const toTitleCase = (str: string): string => {
+  if (!str) return str;
+  return str.replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1));
+};
+
 export const truncate = (str: string, len = 30): string => {
   if (!str) return '';
   return str.length > len ? str.slice(0, len) + '...' : str;
